@@ -27,12 +27,14 @@ class BatchGenerator:
     def __init__(self, vocab_path, train_batch_size=64, eval_batch_size=64):
         self.vocab = torch.load(vocab_path)
         self.data_gen_train, self.data_gen_eval = self.data_generator(train_batch_size, eval_batch_size)
+        self.train_batch_size=train_batch_size
+        self.eval_batch_size=eval_batch_size
 
     def next_train(self):
         try:
             src_sents, tgt_sents = next(self.data_gen_train)
         except StopIteration:
-            self.data_gen_train = self.train_data_generator
+            self.data_gen_train = self.train_data_generator(batch_size=self.train_batch_size)
             src_sents, tgt_sents = next(self.data_gen_train)
         inp_src = to_input_variable(src_sents, vocab=self.vocab.src)
         inp_tgt = to_input_variable(tgt_sents, vocab=self.vocab.tgt)
@@ -42,7 +44,7 @@ class BatchGenerator:
         try:
             src_sents, tgt_sents = next(self.data_gen_eval)
         except StopIteration:
-            self.data_gen_eval = self.eval_data_generator()
+            self.data_gen_eval = self.eval_data_generator(batch_size=self.eval_batch_size)
             src_sents, tgt_sents = next(self.data_gen_eval)
         inp_src = to_input_variable(src_sents, vocab=self.vocab.src)
         inp_tgt = to_input_variable(tgt_sents, vocab=self.vocab.tgt)
