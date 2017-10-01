@@ -33,6 +33,7 @@ class BatchGenerator:
             src_sents, tgt_sents = next(self.data_gen_train)
         except StopIteration:
             self.data_gen_train = self.train_data_generator
+            src_sents, tgt_sents = next(self.data_gen_train)
         inp_src = to_input_variable(src_sents, vocab=self.vocab.src)
         inp_tgt = to_input_variable(tgt_sents, vocab=self.vocab.tgt)
         return torch.transpose(inp_src, 0, 1).contiguous(), torch.transpose(inp_tgt, 0, 1).contiguous()
@@ -41,7 +42,8 @@ class BatchGenerator:
         try:
             src_sents, tgt_sents = next(self.data_gen_eval)
         except StopIteration:
-            self.eval_data_generator = self.eval_data_generator()
+            self.data_gen_eval = self.eval_data_generator()
+            src_sents, tgt_sents = next(self.data_gen_eval)
         inp_src = to_input_variable(src_sents, vocab=self.vocab.src)
         inp_tgt = to_input_variable(tgt_sents, vocab=self.vocab.tgt)
         return torch.transpose(inp_src, 0, 1).contiguous(), torch.transpose(inp_tgt, 0, 1).contiguous()
