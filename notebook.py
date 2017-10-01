@@ -1,12 +1,13 @@
-from matplotlib import pyplot as plt
-%matplotlib inline
-%load_ext autoreload
-%autoreload 2
-plt.rcParams['figure.figsize'] = (15, 9)
+# from matplotlib import pyplot as plt
+# %matplotlib inline
+# %load_ext autoreload
+# %autoreload 2
+# plt.rcParams['figure.figsize'] = (15, 9)
 import torch
 from data_generator import BatchGenerator # data generator for translation
 from vocab import Vocab, VocabEntry
-from model import Seq2SeqModel, Encoder, Decoder, CUDA_wrapper
+from model import Seq2SeqModel, Encoder, Decoder
+from util import CUDA_wrapper
 from time import time
 from torch import optim
 import torch.autograd as autograd
@@ -16,16 +17,19 @@ import torch.nn as nn
 
 vocab_path="data/nmt_iwslt/vocab.bin"
 bg = BatchGenerator(vocab_path=vocab_path)
-
 # %%
-enc = Encoder(len(bg.vocab.src), 4, 5)
-dec = Decoder(len(bg.vocab.tgt), enc.embedding, 4, 5)
-a, b = bg.next()
-a.data.shape
-b.data.shape
-all_hidden, all_cell = enc(a)
-dec(all_hidden, all_cell, b, enc.batch_size)
-
+# src, tgt = bg.next()
+# bg.vocab.tgt.id2word[2]
+# tgt[0]
+#
+# # %%
+# enc = Encoder(len(bg.vocab.src), 4, 5)
+# dec = Decoder(len(bg.vocab.tgt), enc.embedding, 4, 5)
+# a, b = bg.next()
+# a.data.shape
+# b.data.shape
+# all_hidden, all_cell = enc(a)
+# dec(all_hidden, all_cell, b, enc.batch_size)
 # %%
 
 train_batch_size = 256
@@ -53,7 +57,6 @@ loss_function = nn.CrossEntropyLoss()
 
 vocab_size_encoder = len(bg.vocab.src)
 vocab_size_decoder = len(bg.vocab.tgt)
-s2s = Seq2SeqModel(vocab_size_encoder, vocab_size_decoder, 300, 100)
 
 num_runs = 2
 
@@ -121,10 +124,11 @@ for run in range(num_runs):
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
     for step in range(num_steps):
-        chunk_batch = next(train_batch_gen)
-        rev_chunk_batch = revert_words(chunk_batch)
-        chunk_batch_torch = autograd.Variable(CUDA_wrapper(torch.from_numpy(chunk_batch)), requires_grad=False)
-        rev_chunk_batch_torch = autograd.Variable(CUDA_wrapper(torch.from_numpy(rev_chunk_batch)), requires_grad=False)
+        # chunk_batch = next(train_batch_gen)
+        # rev_chunk_batch = revert_words(chunk_batch)
+        # chunk_batch_torch = autograd.Variable(CUDA_wrapper(torch.from_numpy(chunk_batch), requires_grad=False))
+        # rev_chunk_batch_torch = autograd.Variable(CUDA_wrapper(torch.from_numpy(rev_chunk_batch), requires_grad=False))
+        chunk_batch_torch, rev_chunk_batch_torch = bg.next_train()
 
         # chunk_batch_torch, rev_chunk_batch_torch = bg.next()
         if reinforce_strategy == 'argmax_advantage':
@@ -183,11 +187,12 @@ for run in range(num_runs):
         cum_train_loss += train_losses[run][-1]
         cum_train_acc += train_accs[run][-1]
         if do_eval:
-            chunk_batch = next(eval_batch_gen)
-            rev_chunk_batch = revert_words(chunk_batch)
+            # chunk_batch = next(eval_batch_gen)
+            # rev_chunk_batch = revert_words(chunk_batch)
 
-            chunk_batch_torch = autograd.Variable(torch.from_numpy(chunk_batch).cuda(), requires_grad=False)
-            rev_chunk_batch_torch = autograd.Variable(torch.from_numpy(rev_chunk_batch).cuda(), requires_grad=False)
+            # chunk_batch_torch = autograd.Variable(CUDA_wrapper(torch.from_numpy(chunk_batch), requires_grad=False))
+            # rev_chunk_batch_torch = autograd.Variable(CUDA_wrapper(torch.from_numpy(rev_chunk_batch), requires_grad=False))
+            chunk_batch_torch, rev_chunk_batch_torch = bg.next_eval()
 
             unscaled_logits, _, outputs = model(
                 chunk_batch_torch,

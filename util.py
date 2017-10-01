@@ -2,6 +2,12 @@ from collections import defaultdict
 import numpy as np
 from torch.autograd import Variable
 import torch
+def CUDA_wrapper(tensor):
+    use_cuda = True
+    if use_cuda:
+        return tensor.cuda()
+    else:
+        return tensor
 
 def word2id(sents, vocab):
     if type(sents[0]) == list:
@@ -16,7 +22,7 @@ def read_corpus(file_path, source):
         sent = line.strip().split(' ')
         # only append <s> and </s> to the target sentence
         if source == 'tgt':
-            sent = ['<s>'] + sent + ['</s>']
+            sent = sent + ['</s>'] #['<s>'] + sent + ['</s>']
         data.append(sent)
 
     return data
@@ -80,7 +86,6 @@ def to_input_variable(sents, vocab, cuda=False, is_test=False):
     sents_t, masks = input_transpose(word_ids, vocab['<pad>'])
 
     sents_var = Variable(torch.LongTensor(sents_t), volatile=is_test, requires_grad=False)
-    if cuda:
-        sents_var = sents_var.cuda()
+    sents_var = CUDA_wrapper(sents_var)
 
     return sents_var

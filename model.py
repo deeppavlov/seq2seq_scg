@@ -8,13 +8,8 @@ from torch import LongTensor
 import torch.autograd as autograd
 from util import to_input_variable
 from data_generator import data_generator
+from util import CUDA_wrapper
 
-use_cuda = False;
-def CUDA_wrapper(tensor):
-    if use_cuda:
-        return tensor.cuda()
-    else:
-        return tensor
 
 class Encoder(nn.Module):
     def __init__(self, vocab_size, embed_dim, hidden_size, num_layers=1, n_layers=1):
@@ -70,17 +65,8 @@ class Encoder(nn.Module):
         all_cell = torch.transpose(all_cell, 0, 1).contiguous()
         return all_hidden, all_cell
 
-class MySoftmax(nn.Module):
-    def __init__(self):
-        super(MySoftmax, self).__init__()
-
-    def forward(self, input_):
-        batch_size = input_.size()[0]
-        output_ = torch.stack([F.softmax(input_[i]) for i in range(batch_size)], 0)
-        return output_
-
 class Decoder(nn.Module):
-    def __init__(self, vocab_size, embedding, embed_dim, hidden_size, num_layers=1, dropout_rate=0.2):
+    def __init__(self, vocab_size, embedding, embed_dim, hidden_size, work_mode='training', seq_max_len=20, num_layers=1, dropout_rate=0.2):
         super(Decoder, self).__init__()
         self.embed_dim = embed_dim
         self.embedding = embedding
@@ -91,8 +77,10 @@ class Decoder(nn.Module):
         self.W_attention = nn.Linear(hidden_size * 2, hidden_size * 2)
         self.dropout = nn.Dropout(p=dropout_rate)
         self.softmax = nn.Softmax()
+        self.seq_max_len = seq_max_len
+        self.work_mode = work_mode
 
-    def forward(self, all_hidden, all_cell, target_chunk, batch_size, output_mode='argmax'):
+    def forward(self, all_hidden, all_cell, target_chunk, batch_size, feed_mode, output_mode='argmax'):
         dec_feed = None
         batch_size, seq_length = target_chunk.size()
         inp_seq_len = all_hidden.size()[1]
@@ -108,6 +96,8 @@ class Decoder(nn.Module):
         target_chunk_emb = self.embedding(target_chunk)
         dec_h = all_hidden[:, -1, :] # last hidden:[batch_size x hidden_size * 2]
         dec_c = all_cell[:, -1, :]
+        if self.work_mode == 'test':
+            seq_length = self.seq_max_len
         for t in range(seq_length):
             ## calculate attention
             attention = self.W_attention(all_hidden) #  batch_size x inp_seq_length X hidden_size * 2
@@ -119,31 +109,37 @@ class Decoder(nn.Module):
             dec_h, dec_c = self.dec_cell(self.dropout(concatenated_with_attention_feed), (dec_c, dec_h))
             dec_unscaled_logits.append(self.output_proj(dec_h))
             if output_mode == 'argmax':
-                dec_outputs.append(torch.max(dec_unscaled_logits[-1], dim=1)[1])
+                wid = torch.max(dec_unscaled_logits[-1], dim=1)[1]
+                dec_outputs.append(wid)
+                # print('wid:', wid)
+                # print('work_mode:', self.work_mode)
+                # if wid == 2 and self.work_mode == 'test':
+                #     break
             elif output_mode == 'sampling':
                 dec_outputs.append(torch.multinomial(torch.exp(dec_unscaled_logits[-1]), 1).view(batch_size))
             else:
                 raise ValueError("Invalid output_mode: '{}'".format(output_mode))
 
             # feedmode teacher_forcing
-            dec_feed = target_chunk[:, t]
-            dec_feed_emb = target_chunk_emb[:, t]
-            self.dec_feeds.append(dec_feed)
+            if feed_mode == "teacher_forcing":
+                dec_feed = target_chunk[:, t]
+                dec_feed_emb = target_chunk_emb[:, t]
+                self.dec_feeds.append(dec_feed)
         return (
             torch.stack(dec_unscaled_logits, dim=1),
             torch.stack(dec_outputs, dim=1)
         )
 
 class Seq2SeqModel(nn.Module):
-    def __init__(self, vocab_size_encoder, vocab_size_decoder, embed_dim, hidden_size, num_layers=1, dropout_rate=0.2):
+    def __init__(self, vocab_size_encoder, vocab_size_decoder, embed_dim, hidden_size, work_mode='training', num_layers=1, dropout_rate=0.2):
         super(Seq2SeqModel, self).__init__()
-        self.encoder = Encoder(vocab_size_encoder, embed_dim, hidden_size)
-        self.decoder = Decoder(vocab_size_decoder, self.encoder.embedding, embed_dim, hidden_size, num_layers=1, dropout_rate=dropout_rate)
+        self.encoder = CUDA_wrapper(Encoder(vocab_size_encoder, embed_dim, hidden_size))
+        self.decoder = CUDA_wrapper(Decoder(vocab_size_decoder, self.encoder.embedding, embed_dim, hidden_size, work_mode=work_mode, num_layers=1, dropout_rate=dropout_rate))
         self.vocab_size_encoder = vocab_size_encoder
         self.vocab_size_decoder = vocab_size_decoder
         self.embed_dim = embed_dim
         self.hidden_size = hidden_size
 
-    def forward(self, input_chunk, target_chunk, num_layers=1, n_layers=1):
+    def forward(self, input_chunk, target_chunk, feed_mode="teacher_forcing", num_layers=1, n_layers=1):
         all_hidden, all_cell = self.encoder(input_chunk)
-        return self.decoder(all_hidden, all_cell, target_chunk, self.encoder.batch_size)
+        return self.decoder(all_hidden, all_cell, target_chunk, self.encoder.batch_size, feed_mode)

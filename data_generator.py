@@ -7,7 +7,7 @@ from vocab import Vocab, VocabEntry
 from util import read_corpus, batch_slice, data_iter, to_input_variable
 
 
-def data_generator(batch_size=64):
+def data_generator(batch_size_train=64, batch_size_eval=64):
     train_src="data/nmt_iwslt/train.de-en.de.wmixerprep"
     train_tgt="data/nmt_iwslt/train.de-en.en.wmixerprep"
     dev_src="data/nmt_iwslt/valid.de-en.de"
@@ -17,7 +17,7 @@ def data_generator(batch_size=64):
     vocab="data/nmt_iwslt/vocab.bin"
 
     train_data_src = read_corpus(train_src, source='src')
-    train_data_tgt = read_corpus(train_tgt, source = 'tft')
+    train_data_tgt = read_corpus(train_tgt, source = 'tgt')
 
 
     dev_data_src = read_corpus(dev_src, source='src')
@@ -26,18 +26,21 @@ def data_generator(batch_size=64):
     train_data = zip(train_data_src, train_data_tgt)
     dev_data = zip(dev_data_src, dev_data_tgt)
 
-    return data_iter(train_data, batch_size=batch_size)
+    return data_iter(train_data, batch_size=batch_size_train), data_iter(dev_data, batch_size=batch_size_eval)
 
 class BatchGenerator:
     def __init__(self, vocab_path):
         self.vocab = torch.load(vocab_path)
-        self.data_gen = data_generator()
+        self.data_gen_train, self.data_gen_eval = data_generator()
 
-    def __iter__(self):
-        return self
+    def next_train(self):
+        src_sents, tgt_sents = next(self.data_gen_train)
+        inp_src = to_input_variable(src_sents, vocab=self.vocab.src)
+        inp_tgt = to_input_variable(tgt_sents, vocab=self.vocab.tgt)
+        return torch.transpose(inp_src, 0, 1).contiguous(), torch.transpose(inp_tgt, 0, 1).contiguous()
 
-    def next(self):
-        src_sents, tgt_sents = next(self.data_gen)
+    def next_eval(self):
+        src_sents, tgt_sents = next(self.data_gen_eval)
         inp_src = to_input_variable(src_sents, vocab=self.vocab.src)
         inp_tgt = to_input_variable(tgt_sents, vocab=self.vocab.tgt)
         return torch.transpose(inp_src, 0, 1).contiguous(), torch.transpose(inp_tgt, 0, 1).contiguous()
