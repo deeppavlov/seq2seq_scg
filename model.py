@@ -7,7 +7,6 @@ import torch.nn.functional as F
 from torch import LongTensor
 import torch.autograd as autograd
 from util import to_input_variable
-from data_generator import data_generator
 from util import CUDA_wrapper
 
 
@@ -111,10 +110,6 @@ class Decoder(nn.Module):
             if output_mode == 'argmax':
                 wid = torch.max(dec_unscaled_logits[-1], dim=1)[1]
                 dec_outputs.append(wid)
-                # print('wid:', wid)
-                # print('work_mode:', self.work_mode)
-                # if wid == 2 and self.work_mode == 'test':
-                #     break
             elif output_mode == 'sampling':
                 dec_outputs.append(torch.multinomial(torch.exp(dec_unscaled_logits[-1]), 1).view(batch_size))
             else:

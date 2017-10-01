@@ -17,6 +17,8 @@ import torch.nn as nn
 
 vocab_path="data/nmt_iwslt/vocab.bin"
 bg = BatchGenerator(vocab_path=vocab_path)
+
+
 # %%
 # src, tgt = bg.next()
 # bg.vocab.tgt.id2word[2]
