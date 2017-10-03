@@ -21,6 +21,7 @@ class Encoder(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embed_dim)
         self.enc_rnn_cell = nn.LSTMCell(embed_dim, hidden_size)
         self.enc_rnn_cell_dir2 = nn.LSTMCell(embed_dim, hidden_size)
+        self.enc_rnn = nn.LSTM(embed_dim, hidden_size, num_layers, batch_first=True, bidirectional=True)
 
     def forward(self, input_chunk):
         batch_size, seq_length = input_chunk.size()
@@ -34,35 +35,37 @@ class Encoder(nn.Module):
             CUDA_wrapper(torch.zeros(self.num_layers * 2, batch_size, self.hidden_size)),
             requires_grad=False
         )
-        hidden_enc_all_dir1 = []
-        cell_enc_all_dir1 = []
-        hidden_enc_all_dir2 = []
-        cell_enc_all_dir2 = []
-        hi = autograd.Variable(
-            CUDA_wrapper(torch.zeros(self.batch_size, self.hidden_size))
-        )
-        ci = autograd.Variable(
-            CUDA_wrapper(torch.zeros(self.batch_size, self.hidden_size))
-        )
-        for word_i in input_chunk_emb.chunk(input_chunk_emb.size(1), dim=1):
-            hi, ci = self.enc_rnn_cell(word_i.contiguous().view(batch_size, self.embed_dim), (hi, ci))
-            hidden_enc_all_dir1.append(hi)
-            cell_enc_all_dir1.append(ci)
-        for word_i in reversed(input_chunk_emb.chunk(input_chunk_emb.size(1), dim=1)):
-            hi, ci = self.enc_rnn_cell_dir2(word_i.contiguous().view(batch_size, self.embed_dim), (hi, ci))
-            hidden_enc_all_dir2.append(hi)
-            cell_enc_all_dir2.append(ci)
-        # stack hidden and cell lists
-        hidden_dir1 = torch.stack(hidden_enc_all_dir1, dim = 0)
-        cell_dir1 = torch.stack(cell_enc_all_dir1, dim = 0)
-        hidden_dir2 = torch.stack(hidden_enc_all_dir2, dim = 0)
-        cell_dir2 = torch.stack(cell_enc_all_dir2, dim = 0)
-        # cat all directions of hidden and cell
-        all_hidden = torch.cat((hidden_dir1, hidden_dir2), dim = 2)
-        all_hidden = torch.transpose(all_hidden, 0, 1).contiguous()
-        all_cell = torch.cat((cell_dir1, cell_dir2), dim = 2)
-        all_cell = torch.transpose(all_cell, 0, 1).contiguous()
-        return all_hidden, all_cell
+        all_hidden, enc_hc_last = self.enc_rnn(input_chunk_emb, (first_hidden_state, first_cell_state))
+        # hidden_enc_all_dir1 = []
+        # cell_enc_all_dir1 = []
+        # hidden_enc_all_dir2 = []
+        # cell_enc_all_dir2 = []
+        # hi = autograd.Variable(
+        #     CUDA_wrapper(torch.zeros(self.batch_size, self.hidden_size))
+        # )
+        # ci = autograd.Variable(
+        #     CUDA_wrapper(torch.zeros(self.batch_size, self.hidden_size))
+        # )
+        # for word_i in input_chunk_emb.chunk(input_chunk_emb.size(1), dim=1):
+        #     hi, ci = self.enc_rnn_cell(word_i.contiguous().view(batch_size, self.embed_dim), (hi, ci))
+        #     hidden_enc_all_dir1.append(hi)
+        #     cell_enc_all_dir1.append(ci)
+        # for word_i in reversed(input_chunk_emb.chunk(input_chunk_emb.size(1), dim=1)):
+        #     hi, ci = self.enc_rnn_cell_dir2(word_i.contiguous().view(batch_size, self.embed_dim), (hi, ci))
+        #     hidden_enc_all_dir2.append(hi)
+        #     cell_enc_all_dir2.append(ci)
+        # # stack hidden and cell lists
+        # hidden_dir1 = torch.stack(hidden_enc_all_dir1, dim = 0)
+        # cell_dir1 = torch.stack(cell_enc_all_dir1, dim = 0)
+        # hidden_dir2 = torch.stack(hidden_enc_all_dir2, dim = 0)
+        # cell_dir2 = torch.stack(cell_enc_all_dir2, dim = 0)
+        # # cat all directions of hidden and cell
+        # all_hidden = torch.cat((hidden_dir1, hidden_dir2), dim = 2)
+        # all_hidden = torch.transpose(all_hidden, 0, 1).contiguous()
+        # all_cell = torch.cat((cell_dir1, cell_dir2), dim = 2)
+        # all_cell = torch.transpose(all_cell, 0, 1).contiguous()
+        # return all_hidden, all_cell
+        return all_hidden, enc_hc_last
 
 class Decoder(nn.Module):
     def __init__(self, vocab_size, embedding, embed_dim, hidden_size, work_mode='training', seq_max_len=20, num_layers=1, dropout_rate=0.2):
@@ -79,7 +82,7 @@ class Decoder(nn.Module):
         self.seq_max_len = seq_max_len
         self.work_mode = work_mode
 
-    def forward(self, all_hidden, all_cell, target_chunk, batch_size, feed_mode, output_mode='argmax'):
+    def forward(self, all_hidden, last_hc, target_chunk, batch_size, feed_mode, output_mode='argmax'):
         dec_feed = None
         batch_size, seq_length = target_chunk.size()
         inp_seq_len = all_hidden.size()[1]
@@ -93,8 +96,8 @@ class Decoder(nn.Module):
 
         target_chunk_emb = None
         target_chunk_emb = self.embedding(target_chunk)
-        dec_h = all_hidden[:, -1, :] # last hidden:[batch_size x hidden_size * 2]
-        dec_c = all_cell[:, -1, :]
+        dec_h = torch.cat(last_hc[0], 1)# all_hidden[:, -1, :] # last hidden:[batch_size x hidden_size * 2]
+        dec_c = torch.cat(last_hc[1], 1)#all_cell[:, -1, :]
         if self.work_mode == 'test':
             seq_length = self.seq_max_len
         for t in range(seq_length):
@@ -105,7 +108,7 @@ class Decoder(nn.Module):
             context_vector = torch.bmm(attention.view(batch_size, 1, inp_seq_len), all_hidden) # [batch_size x 1 x hidden_size * 2]
             context_vector = context_vector.view(batch_size, self.hidden_size * 2)
             concatenated_with_attention_feed = torch.cat((context_vector, dec_feed_emb), dim=1) # [batch_size x hidden_size * 2 + embed_size]
-            dec_h, dec_c = self.dec_cell(self.dropout(concatenated_with_attention_feed), (dec_c, dec_h))
+            dec_h, dec_c = self.dec_cell(self.dropout(concatenated_with_attention_feed), (dec_h, dec_c))
             dec_unscaled_logits.append(self.output_proj(dec_h))
             if output_mode == 'argmax':
                 wid = torch.max(dec_unscaled_logits[-1], dim=1)[1]
@@ -136,5 +139,5 @@ class Seq2SeqModel(nn.Module):
         self.hidden_size = hidden_size
 
     def forward(self, input_chunk, target_chunk, feed_mode="teacher_forcing", num_layers=1, n_layers=1):
-        all_hidden, all_cell = self.encoder(input_chunk)
-        return self.decoder(all_hidden, all_cell, target_chunk, self.encoder.batch_size, feed_mode)
+        all_hidden, last_hc = self.encoder(input_chunk)
+        return self.decoder(all_hidden, last_hc, target_chunk, self.encoder.batch_size, feed_mode)
