@@ -120,9 +120,9 @@ for run in range(num_runs):
 
     global_start_time = time()
     last_print_time = global_start_time
-    model = CUDA_wrapper(Seq2SeqModel(vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder, embed_dim=512, hidden_size=512))
+    model = CUDA_wrapper(Seq2SeqModel(vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder, embed_dim=256, hidden_size=256))
 
-    model_pav = CUDA_wrapper(Seq2SeqModel(vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder, embed_dim=512, hidden_size=512))
+    model_pav = CUDA_wrapper(Seq2SeqModel(vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder, embed_dim=256, hidden_size=256))
     av_advantage = []
     std_advantage = []
 
@@ -216,13 +216,14 @@ for run in range(num_runs):
 
             unscaled_logits, outputs = model(
                 chunk_batch_torch, rev_chunk_batch_torch,
+                work_mode='test'
                 # output_mode='argmax', feed_mode='sampling'
             )
             if use_masked_loss:
                 eval_loss = loss_function(unscaled_logits, rev_chunk_batch_torch, tgt_len)
             else:
                 eval_loss = loss_function(unscaled_logits.view(-1, vocab_size_decoder), rev_chunk_batch_torch.view(-1))
-            eval_acc = torch.mean(torch.eq(outputs, rev_chunk_batch_torch).float())
+            eval_acc = torch.mean(torch.eq(outputs[:, :rev_chunk_batch_torch.size(1)].contiguous(), rev_chunk_batch_torch).float())
 
             eval_losses[run].append(eval_loss.data.cpu().numpy().mean())
             eval_accs[run].append(eval_acc.data.cpu().numpy().mean())

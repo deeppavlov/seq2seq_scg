@@ -50,7 +50,7 @@ for _ in range(100):
             snts.append(cur_snt[:cur_snt.index("</s>") if end_snt in cur_snt else len(cur_snt)].split())
         return snts
     rev_chunk_batch_torch.data.shape
-    unscaled_logits, outputs = model(chunk_batch_torch, rev_chunk_batch_torch)
+    unscaled_logits, outputs = model(chunk_batch_torch, rev_chunk_batch_torch, work_mode='test')
     outputs.data.shape
     rev_chunk_batch_torch.data.shape
     hypothesis = transform_tensor_to_list_of_snts(outputs, bg.vocab.tgt.id2word)
@@ -59,4 +59,15 @@ for _ in range(100):
     list_of_hypotheses = hypothesis
     list_of_references = reference
     bleu_scores.append(nltk.translate.bleu_score.corpus_bleu(list_of_references, list_of_hypotheses))
+
 np.mean(bleu_scores)
+
+# %% NOT BLEU ###############
+# %%
+print('value')
+embedding = nn.Embedding(10, 3)
+input = autograd.Variable(torch.LongTensor([[1,2,4,5],[4,3,2,9]])).transpose(0, 1).contiguous()
+inp_emb = embedding(input)
+inp_emb.data.shape
+packed = torch.nn.utils.rnn.pack_padded_sequence(inp_emb, [4, 3])
+torch.nn.utils.rnn.pad_packed_sequence(packed)[0].transpose(0, 1)

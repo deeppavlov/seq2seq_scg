@@ -40,7 +40,7 @@ class Encoder(nn.Module):
         return all_hidden, enc_hc_last
 
 class Decoder(nn.Module):
-    def __init__(self, vocab_size, embed_dim, hidden_size, seq_max_len=20, num_layers=1, dropout_rate=0.2, teacher_forcing_ratio=0.5):
+    def __init__(self, vocab_size, embed_dim, hidden_size, seq_max_len=200, num_layers=1, dropout_rate=0.2, teacher_forcing_ratio=0.5):
         super(Decoder, self).__init__()
         self.embed_dim = embed_dim
         self.embedding = nn.Embedding(vocab_size, embed_dim)
@@ -110,10 +110,10 @@ class Decoder(nn.Module):
         )
 
 class Seq2SeqModel(nn.Module):
-    def __init__(self, vocab_size_encoder, vocab_size_decoder, embed_dim, hidden_size, num_layers=1, dropout_rate=0.2, teacher_forcing_ratio=0.5):
+    def __init__(self, vocab_size_encoder, vocab_size_decoder, embed_dim, hidden_size, num_layers=1, dropout_rate=0.2, teacher_forcing_ratio=1):
         super(Seq2SeqModel, self).__init__()
         self.encoder = CUDA_wrapper(Encoder(vocab_size_encoder, embed_dim, hidden_size))
-        self.decoder = CUDA_wrapper(Decoder(vocab_size_decoder, embed_dim, hidden_size, num_layers=1, dropout_rate=dropout_rate, teacher_forcing_ratio=0.5))
+        self.decoder = CUDA_wrapper(Decoder(vocab_size_decoder, embed_dim, hidden_size, num_layers=1, dropout_rate=dropout_rate, teacher_forcing_ratio=teacher_forcing_ratio))
         self.vocab_size_encoder = vocab_size_encoder
         self.vocab_size_decoder = vocab_size_decoder
         self.embed_dim = embed_dim

@@ -137,6 +137,9 @@ def masked_cross_entropy(logits, target, length):
     Returns:
         loss: An average loss value masked by the length.
     """
+    # cut len of logits
+    logits = logits[:, :target.size()[1], :].contiguous()
+
 
     # logits_flat: (batch * max_len, num_classes)
     logits_flat = logits.view(-1, logits.size(-1))
