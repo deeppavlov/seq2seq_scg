@@ -12,7 +12,7 @@ import random
 
 
 class Encoder(nn.Module):
-    def __init__(self, vocab_size, embed_dim, hidden_size, num_layers=1, n_layers=1):
+    def __init__(self, vocab_size, embed_dim, hidden_size, num_layers=1):
         super(Encoder, self).__init__()
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
@@ -20,8 +20,6 @@ class Encoder(nn.Module):
         self.num_layers = num_layers
 
         self.embedding = nn.Embedding(vocab_size, embed_dim)
-        self.enc_rnn_cell = nn.LSTMCell(embed_dim, hidden_size)
-        self.enc_rnn_cell_dir2 = nn.LSTMCell(embed_dim, hidden_size)
         self.enc_rnn = nn.LSTM(embed_dim, hidden_size, num_layers, batch_first=True, bidirectional=True)
 
     def forward(self, input_chunk):
@@ -40,7 +38,7 @@ class Encoder(nn.Module):
         return all_hidden, enc_hc_last
 
 class Decoder(nn.Module):
-    def __init__(self, vocab_size, embed_dim, hidden_size, seq_max_len=200, num_layers=1, dropout_rate=0.2, teacher_forcing_ratio=0.5):
+    def __init__(self, vocab_size, embed_dim, hidden_size, seq_max_len=60, num_layers=1, dropout_rate=0.2, teacher_forcing_ratio=0.5):
         super(Decoder, self).__init__()
         self.embed_dim = embed_dim
         self.embedding = nn.Embedding(vocab_size, embed_dim)
@@ -67,7 +65,6 @@ class Decoder(nn.Module):
         dec_outputs = []
         self.dec_feeds = []
 
-        target_chunk_emb = None
         target_chunk_emb = self.embedding(target_chunk)
         dec_h = torch.cat(last_hc[0], 1)# all_hidden[:, -1, :] # last hidden:[batch_size x hidden_size * 2]
         dec_c = torch.cat(last_hc[1], 1)#all_cell[:, -1, :]
@@ -82,8 +79,8 @@ class Decoder(nn.Module):
             self.attention.append(attention)
             context_vector = torch.bmm(attention.view(batch_size, 1, inp_seq_len), all_hidden) # [batch_size x 1 x hidden_size * 2]
             context_vector = context_vector.view(batch_size, self.hidden_size * 2)
-            concatenated_with_attention_feed = torch.cat((context_vector, dec_feed_emb), dim=1) # [batch_size x hidden_size * 2 + embed_size]
-            dec_h, dec_c = self.dec_cell(self.dropout(concatenated_with_attention_feed), (dec_h, dec_c))
+            concatenated_with_attention_feed = torch.cat((context_vector, self.dropout(dec_feed_emb)), dim=1) # [batch_size x hidden_size * 2 + embed_size]
+            dec_h, dec_c = self.dec_cell(concatenated_with_attention_feed, (dec_h, dec_c))
             dec_unscaled_logits.append(self.output_proj(dec_h))
             if output_mode == 'argmax':
                 wid = torch.max(dec_unscaled_logits[-1], dim=1)[1]
@@ -110,15 +107,19 @@ class Decoder(nn.Module):
         )
 
 class Seq2SeqModel(nn.Module):
-    def __init__(self, vocab_size_encoder, vocab_size_decoder, embed_dim, hidden_size, num_layers=1, dropout_rate=0.2, teacher_forcing_ratio=1):
+    def __init__(self, vocab_size_encoder, vocab_size_decoder, embed_dim, hidden_size, num_layers_enc=1, num_layers_dec=1, dropout_rate=0.2, teacher_forcing_ratio=1):
         super(Seq2SeqModel, self).__init__()
-        self.encoder = CUDA_wrapper(Encoder(vocab_size_encoder, embed_dim, hidden_size))
-        self.decoder = CUDA_wrapper(Decoder(vocab_size_decoder, embed_dim, hidden_size, num_layers=1, dropout_rate=dropout_rate, teacher_forcing_ratio=teacher_forcing_ratio))
+        self.encoder = CUDA_wrapper(Encoder(vocab_size_encoder, embed_dim, hidden_size, num_layers=num_layers_enc))
+        self.decoder = CUDA_wrapper(Decoder(vocab_size_decoder, embed_dim, hidden_size, num_layers=num_layers_dec, dropout_rate=dropout_rate, teacher_forcing_ratio=teacher_forcing_ratio))
         self.vocab_size_encoder = vocab_size_encoder
         self.vocab_size_decoder = vocab_size_decoder
         self.embed_dim = embed_dim
         self.hidden_size = hidden_size
+        initrange = 0.1
+        self.encoder.embedding.weight.data.uniform_(-initrange, initrange)
+        self.decoder.embedding.weight.data.uniform_(-initrange, initrange)
+        self.decoder.output_proj.bias.data.fill_(0)
 
-    def forward(self, input_chunk, target_chunk, work_mode='training', feed_mode="teacher_forcing", num_layers=1, n_layers=1):
+    def forward(self, input_chunk, target_chunk, work_mode='training', feed_mode="teacher_forcing"):
         all_hidden, last_hc = self.encoder(input_chunk)
         return self.decoder(all_hidden, last_hc, target_chunk, self.encoder.batch_size, feed_mode, work_mode=work_mode)

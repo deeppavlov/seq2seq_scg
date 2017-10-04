@@ -32,7 +32,7 @@ from util import id_to_char, char_to_id, masked_cross_entropy
 # dec(all_hidden, all_cell, b, enc.batch_size)
 # %%
 
-train_batch_size = 128 # that was 256
+train_batch_size = 200 # that was 256
 eval_batch_size = 64
 test_batch_size = 64
 decode_batch_size = 8
@@ -120,9 +120,9 @@ for run in range(num_runs):
 
     global_start_time = time()
     last_print_time = global_start_time
-    model = CUDA_wrapper(Seq2SeqModel(vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder, embed_dim=256, hidden_size=256))
+    model = CUDA_wrapper(Seq2SeqModel(vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder, embed_dim=128, hidden_size=256))
 
-    model_pav = CUDA_wrapper(Seq2SeqModel(vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder, embed_dim=256, hidden_size=256))
+    # model_pav = CUDA_wrapper(Seq2SeqModel(vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder, embed_dim=128, hidden_size=256))
     av_advantage = []
     std_advantage = []
 
@@ -259,7 +259,7 @@ for run in range(num_runs):
                     outputs_np = outputs.data.cpu().numpy()
                     cur_decode_batch_size = min(decode_batch_size, min(len(rev_chunk_batch_torch), len(outputs_np)))
                     for i in range(cur_decode_batch_size):
-                        print('{}|  vs  |{}'.format(
+                        print('{}\n|  vs  |\n{}'.format(
                             ' '.join([bg.vocab.tgt.id2word[k.data[0]] for k in rev_chunk_batch_torch[i]]),
                             ' '.join([bg.vocab.tgt.id2word[k.data[0]] for k in outputs_np[i]])
                         ))

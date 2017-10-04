@@ -15,13 +15,14 @@ import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib.ticker as ticker
 import nltk
+import fasttext
 os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 %matplotlib inline
 plt.rcParams['figure.figsize'] = (15, 9)
 
 # %% loading the model
 vocab_path="data/nmt_iwslt/vocab.bin"
-train_batch_size = 128 # that was 256
+train_batch_size = 80 # that was 256
 eval_batch_size = 64
 test_batch_size = 64
 bg = BatchGenerator(vocab_path=vocab_path, train_batch_size=train_batch_size, eval_batch_size=eval_batch_size, test_batch_size=test_batch_size)
@@ -31,7 +32,7 @@ vocab_size_encoder = len(bg.vocab.src)
 vocab_size_decoder = len(bg.vocab.tgt)
 
 
-model = Seq2SeqModel(vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder, embed_dim=512, hidden_size=512)
+model = Seq2SeqModel(vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder, embed_dim=512, hidden_size=1024)
 model.load_state_dict(torch.load('saved_model_step=19999_time=2017-10-03 18:00:33.059905'))
 
 # %%
@@ -71,3 +72,52 @@ inp_emb = embedding(input)
 inp_emb.data.shape
 packed = torch.nn.utils.rnn.pack_padded_sequence(inp_emb, [4, 3])
 torch.nn.utils.rnn.pad_packed_sequence(packed)[0].transpose(0, 1)
+
+
+# %%
+from gensim.models.wrappers import FastText
+w2v_model = FastText.load_fasttext_format('data/fasttext/wiki.de.bin')
+
+# %%
+
+# %%
+import numpy as np
+d = dict()
+with open('data/fasttext/wiki.de.vec') as f:
+    print(next(f))
+    for i in f:
+        cur_line = i.split()
+        word = cur_line[0]
+        # print(cur_line)
+        try:
+            emb = np.array(list(map(float, cur_line[1:])))
+        except:
+            print(cur_line)
+        d[word] = emb
+# %%
+# d['hier']
+print('lol')
+strng
+text_splited = text.split('\n')
+len(text_splited[0])
+print(len(text_splited[0].split()))
+
+# %%
+vocab_path="data/nmt_iwslt/vocab.bin"
+train_batch_size = 80 # that was 256
+eval_batch_size = 64
+test_batch_size = 64
+bg = BatchGenerator(vocab_path=vocab_path, train_batch_size=train_batch_size, eval_batch_size=eval_batch_size, test_batch_size=test_batch_size)
+
+# embedding = nn.Embedding(embeddings.size(0), embeddings.size(1))
+len(d)
+# d.pop('world')
+# %%
+embeddings = np.zeros((len(bg.vocab.src), 300))
+# %%
+new_dict = dict()
+for i in bg.vocab.src.word2id.keys():
+    if i in d:
+        new_dict[i] = d[i]
+        embeddings[bg.vocab.src.word2id[i]] = d[i]
+len(new_dict.keys())
