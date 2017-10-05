@@ -12,15 +12,22 @@ import random
 
 
 class Encoder(nn.Module):
-    def __init__(self, vocab_size, embed_dim, hidden_size, num_layers=1):
+    def __init__(self, vocab_size, embed_dim, hidden_size, num_layers=1, embeddings=None):
         super(Encoder, self).__init__()
         self.vocab_size = vocab_size
-        self.embed_dim = embed_dim
+
         self.hidden_size = hidden_size
         self.num_layers = num_layers
-
-        self.embedding = nn.Embedding(vocab_size, embed_dim)
-        self.enc_rnn = nn.LSTM(embed_dim, hidden_size, num_layers, batch_first=True, bidirectional=True)
+        if embeddings is not None:
+            print('using pretrained embeddings for encoder with shape: ', embeddings.shape)
+            self.embed_dim = embeddings.shape[1]
+            self.embedding = nn.Embedding(*embeddings.shape)
+            self.embedding.weight = nn.Parameter(torch.FloatTensor(embeddings))
+            self.embedding.weight.requires_grad = False
+        else:
+            self.embedding = nn.Embedding(vocab_size, embed_dim)
+            self.embed_dim = embed_dim
+        self.enc_rnn = nn.LSTM(self.embed_dim, hidden_size, num_layers, batch_first=True, bidirectional=True)
 
     def forward(self, input_chunk):
         batch_size, seq_length = input_chunk.size()
@@ -38,13 +45,20 @@ class Encoder(nn.Module):
         return all_hidden, enc_hc_last
 
 class Decoder(nn.Module):
-    def __init__(self, vocab_size, embed_dim, hidden_size, seq_max_len=60, num_layers=1, dropout_rate=0.2, teacher_forcing_ratio=0.5):
+    def __init__(self, vocab_size, embed_dim, hidden_size, seq_max_len=60, num_layers=1, embeddings=None, dropout_rate=0.2, teacher_forcing_ratio=0.5):
         super(Decoder, self).__init__()
-        self.embed_dim = embed_dim
-        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        if embeddings is not None:
+            print('using pretrained embeddings for decoder with shape: ', embeddings.shape)
+            self.embed_dim = embeddings.shape[1]
+            self.embedding = nn.Embedding(*embeddings.shape)
+            self.embedding.weight = nn.Parameter(torch.FloatTensor(embeddings))
+            self.embedding.weight.requires_grad = False
+        else:
+            self.embed_dim = embed_dim
+            self.embedding = nn.Embedding(vocab_size, embed_dim)
         self.hidden_size = hidden_size
         self.num_layers = num_layers
-        self.dec_cell = nn.LSTMCell(hidden_size * 2 + embed_dim, hidden_size * num_layers * 2)
+        self.dec_cell = nn.LSTMCell(hidden_size * 2 + self.embed_dim, hidden_size * num_layers * 2)
         self.output_proj = nn.Linear(hidden_size * num_layers * 2, vocab_size)
         self.W_attention = nn.Linear(hidden_size * 2, hidden_size * 2)
         self.dropout = nn.Dropout(p=dropout_rate)
@@ -107,10 +121,12 @@ class Decoder(nn.Module):
         )
 
 class Seq2SeqModel(nn.Module):
-    def __init__(self, vocab_size_encoder, vocab_size_decoder, embed_dim, hidden_size, num_layers_enc=1, num_layers_dec=1, dropout_rate=0.2, teacher_forcing_ratio=1):
+    def __init__(self, vocab_size_encoder, vocab_size_decoder, embed_dim, hidden_size, enc_pre_emb=None, dec_pre_emb=None,
+                 num_layers_enc=1, num_layers_dec=1, dropout_rate=0.2, teacher_forcing_ratio=1):
         super(Seq2SeqModel, self).__init__()
-        self.encoder = CUDA_wrapper(Encoder(vocab_size_encoder, embed_dim, hidden_size, num_layers=num_layers_enc))
-        self.decoder = CUDA_wrapper(Decoder(vocab_size_decoder, embed_dim, hidden_size, num_layers=num_layers_dec, dropout_rate=dropout_rate, teacher_forcing_ratio=teacher_forcing_ratio))
+        self.encoder = CUDA_wrapper(Encoder(vocab_size_encoder, embed_dim, hidden_size, num_layers=num_layers_enc, embeddings=enc_pre_emb))
+        self.decoder = CUDA_wrapper(Decoder(vocab_size_decoder, embed_dim, hidden_size, num_layers=num_layers_dec, embeddings=dec_pre_emb,
+                                            dropout_rate=dropout_rate, teacher_forcing_ratio=teacher_forcing_ratio))
         self.vocab_size_encoder = vocab_size_encoder
         self.vocab_size_decoder = vocab_size_decoder
         self.embed_dim = embed_dim

@@ -15,6 +15,7 @@ from text_reverse_data_generator import get_data_generators, revert_words # data
 import torch.nn as nn
 import datetime
 from util import id_to_char, char_to_id, masked_cross_entropy
+import pickle
 # %%  <- this symbols mean "cell seporator" in Hydrogen plugin for Atom
 
 # %%
@@ -95,6 +96,12 @@ grad_norms = None
 grad_norms_biased = None
 train_batch_gen, eval_batch_gen = get_data_generators(train_batch_size, chunk_length, eval_batch_size)
 
+with open('data/fasttext/my_de_emb', 'rb') as f:
+    de_emb = pickle.load(f)
+
+with open('data/fasttext/my_en_emb', 'rb') as f:
+    en_emb = pickle.load(f)
+
 # the_model = Seq2SeqModel(vocab_size_encoder=10, vocab_size_decoder=10, embed_dim=8, hidden_size=48)
 # %% TRAINING
 for run in range(num_runs):
@@ -120,7 +127,7 @@ for run in range(num_runs):
 
     global_start_time = time()
     last_print_time = global_start_time
-    model = CUDA_wrapper(Seq2SeqModel(vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder, embed_dim=128, hidden_size=256))
+    model = CUDA_wrapper(Seq2SeqModel(vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder, enc_pre_emb=de_emb, dec_pre_emb=en_emb, embed_dim=128, hidden_size=256))
 
     # model_pav = CUDA_wrapper(Seq2SeqModel(vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder, embed_dim=128, hidden_size=256))
     av_advantage = []
@@ -131,7 +138,7 @@ for run in range(num_runs):
 
     init_lr = 0.0001
     lr = init_lr
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
 
     for step in range(num_steps):
         ######################## words_reverser ########################
@@ -261,7 +268,7 @@ for run in range(num_runs):
                     for i in range(cur_decode_batch_size):
                         print('{}\n|  vs  |\n{}'.format(
                             ' '.join([bg.vocab.tgt.id2word[k.data[0]] for k in rev_chunk_batch_torch[i]]),
-                            ' '.join([bg.vocab.tgt.id2word[k.data[0]] for k in outputs_np[i]])
+                            ' '.join([bg.vocab.tgt.id2word[k] for k in outputs_np[i]])
                         ))
                 else:
                     print('Eval loss: {:.2f}; eval accuracy: {:.2f}'.format(
