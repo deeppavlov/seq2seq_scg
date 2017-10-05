@@ -1,10 +1,6 @@
-#!/usr/bin/env perl
-#
-# This file is part of moses.  Its use is licensed under the GNU Lesser General
-# Public License version 2.1 or, at your option, any later version.
+#!/usr/bin/perl -w
 
 # $Id$
-use warnings;
 use strict;
 
 my $lowercase = 0;
@@ -31,22 +27,10 @@ while(-e "$stem$ref") {
 &add_to_ref($stem,\@REF) if -e $stem;
 die("ERROR: could not find reference file $stem") unless scalar @REF;
 
-# add additional references explicitly specified on the command line
-shift;
-foreach my $stem (@ARGV) {
-    &add_to_ref($stem,\@REF) if -e $stem;
-}
-
-
-
 sub add_to_ref {
     my ($file,$REF) = @_;
     my $s=0;
-    if ($file =~ /.gz$/) {
-	open(REF,"gzip -dc $file|") or die "Can't read $file";
-    } else {
-	open(REF,$file) or die "Can't read $file";
-    }
+    open(REF,$file) or die "Can't read $file";
     while(<REF>) {
 	chop;
 	push @{$$REF[$s++]}, $_;
@@ -150,19 +134,34 @@ if ($length_reference==0){
   exit(1);
 }
 
-if ($length_translation<$length_reference) {
-  $brevity_penalty = exp(1-$length_reference/$length_translation);
-}
-$bleu = $brevity_penalty * exp((my_log( $bleu[1] ) +
-				my_log( $bleu[2] ) +
-				my_log( $bleu[3] ) +
-				my_log( $bleu[4] ) ) / 4) ;
-printf "BLEU = %.2f, %.1f/%.1f/%.1f/%.1f (BP=%.3f, ratio=%.3f, hyp_len=%d, ref_len=%d)\n",
-    100*$bleu,
-    100*$bleu[1],
-    100*$bleu[2],
-    100*$bleu[3],
-    100*$bleu[4],
+#if ($length_translation<$length_reference) {
+#  $brevity_penalty = exp(1-$length_reference/$length_translation);
+#}
+
+#$bleu = $brevity_penalty * exp((my_log( $bleu[1] ) +
+#				my_log( $bleu[2] ) +
+#				my_log( $bleu[3] ) +
+#				my_log( $bleu[4] ) ) / 4) ;
+
+my $bleu_1 = $brevity_penalty * exp((my_log( $bleu[1] )));
+
+my $bleu_2 = $brevity_penalty * exp((my_log( $bleu[1] ) +
+                               my_log( $bleu[2] ) ) / 2) ;
+
+my $bleu_3 = $brevity_penalty * exp((my_log( $bleu[1] ) +
+                               my_log( $bleu[2] ) +
+                               my_log( $bleu[3] ) ) / 3) ;
+
+my $bleu_4 = $brevity_penalty * exp((my_log( $bleu[1] ) +
+                               my_log( $bleu[2] ) +
+                               my_log( $bleu[3] ) +
+                               my_log( $bleu[4] ) ) / 4) ;
+
+printf "BLEU = %.1f/%.1f/%.1f/%.1f (BP=%.3f, ratio=%.3f, hyp_len=%d, ref_len=%d)\n",
+    100*$bleu_1,
+    100*$bleu_2,
+    100*$bleu_3,
+    100*$bleu_4,
     $brevity_penalty,
     $length_translation / $length_reference,
     $length_translation,

@@ -16,8 +16,27 @@ import torch.nn as nn
 import datetime
 from util import id_to_char, char_to_id, masked_cross_entropy
 import pickle
+import nltk
 # %%  <- this symbols mean "cell seporator" in Hydrogen plugin for Atom
+def transform_seq_to_sent(seq, vcb):
+    return ' '.join([vcb[i] for i in seq])
 
+def transform_tensor_to_list_of_snts(tensor, vcb):
+    np_tens = tensor.data.cpu().numpy()
+    snts = []
+    end_snt = "</s>"
+    for i in np_tens:
+        cur_snt = transform_seq_to_sent(i, vcb)
+        snts.append(cur_snt[:cur_snt.index("</s>") if end_snt in cur_snt else len(cur_snt)].split())
+    return snts
+
+def bleu_score(unscaled_logits, outputs, rev_chunk_batch_torch, vcb_id2word):
+    hypothesis = transform_tensor_to_list_of_snts(outputs, vcb_id2word)
+    reference = transform_tensor_to_list_of_snts(rev_chunk_batch_torch, vcb_id2word)
+    reference = [[cur_ref] for cur_ref in reference]
+    list_of_hypotheses = hypothesis
+    list_of_references = reference
+    return nltk.translate.bleu_score.corpus_bleu(list_of_references, list_of_hypotheses)
 # %%
 # src, tgt = bg.next()
 # bg.vocab.tgt.id2word[2]
@@ -71,7 +90,7 @@ vocab_size_decoder = len(bg.vocab.tgt)
 num_runs = 1
 
 num_steps = 60000
-print_skip = 100
+print_skip = 50
 save_per_step = 10000
 
 train_losses = []
@@ -124,6 +143,7 @@ for run in range(num_runs):
     eval_accs.append([])
     cum_eval_loss = 0
     cum_eval_acc = 0
+    cum_eval_bleu = 0
 
     global_start_time = time()
     last_print_time = global_start_time
@@ -236,6 +256,7 @@ for run in range(num_runs):
             eval_accs[run].append(eval_acc.data.cpu().numpy().mean())
 
             cum_eval_loss += eval_losses[run][-1]
+            cum_eval_bleu += bleu_score(unscaled_logits, outputs, rev_chunk_batch_torch, bg.vocab.tgt.id2word)
             cum_eval_acc += eval_accs[run][-1]
 
         # Print:
@@ -257,11 +278,12 @@ for run in range(num_runs):
 
             if do_eval:
                 if task=='translation':
-                    print('Eval loss: {:.2f}; eval accuracy: {:.2f}'.format(
-                        cum_eval_loss / print_skip, cum_eval_acc / print_skip
+                    print('Eval loss: {:.2f}; eval accuracy: {:.2f}; eval bleu: {:.2f}'.format(
+                        cum_eval_loss / print_skip, cum_eval_acc / print_skip, cum_eval_bleu / print_skip
                     ))
                     cum_eval_loss = 0
                     cum_eval_acc = 0
+                    cum_eval_bleu = 0
 
                     outputs_np = outputs.data.cpu().numpy()
                     cur_decode_batch_size = min(decode_batch_size, min(len(rev_chunk_batch_torch), len(outputs_np)))
@@ -270,6 +292,7 @@ for run in range(num_runs):
                             ' '.join([bg.vocab.tgt.id2word[k.data[0]] for k in rev_chunk_batch_torch[i]]),
                             ' '.join([bg.vocab.tgt.id2word[k] for k in outputs_np[i]])
                         ))
+
                 else:
                     print('Eval loss: {:.2f}; eval accuracy: {:.2f}'.format(
                         cum_eval_loss / print_skip, cum_eval_acc / print_skip

@@ -80,8 +80,8 @@ class Vocab(object):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--src_vocab_size', default=50000, type=int, help='source vocabulary size')
-    parser.add_argument('--tgt_vocab_size', default=50000, type=int, help='target vocabulary size')
+    parser.add_argument('--src_vocab_size', default=32009, type=int, help='source vocabulary size')
+    parser.add_argument('--tgt_vocab_size', default=22822, type=int, help='target vocabulary size')
     parser.add_argument('--include_singleton', action='store_true', default=False, help='whether to include singleton'
                                                                                         'in the vocabulary (default=False)')
 

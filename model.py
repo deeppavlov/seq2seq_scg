@@ -23,7 +23,7 @@ class Encoder(nn.Module):
             self.embed_dim = embeddings.shape[1]
             self.embedding = nn.Embedding(*embeddings.shape)
             self.embedding.weight = nn.Parameter(torch.FloatTensor(embeddings))
-            self.embedding.weight.requires_grad = False
+            # self.embedding.weight.requires_grad = False
         else:
             self.embedding = nn.Embedding(vocab_size, embed_dim)
             self.embed_dim = embed_dim
@@ -52,7 +52,7 @@ class Decoder(nn.Module):
             self.embed_dim = embeddings.shape[1]
             self.embedding = nn.Embedding(*embeddings.shape)
             self.embedding.weight = nn.Parameter(torch.FloatTensor(embeddings))
-            self.embedding.weight.requires_grad = False
+            # self.embedding.weight.requires_grad = False
         else:
             self.embed_dim = embed_dim
             self.embedding = nn.Embedding(vocab_size, embed_dim)
