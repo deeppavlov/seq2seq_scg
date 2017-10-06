@@ -45,7 +45,11 @@ class Encoder(nn.Module):
         return all_hidden, enc_hc_last
 
 class Decoder(nn.Module):
-    def __init__(self, vocab_size, embed_dim, hidden_size, seq_max_len=60, num_layers=1, embeddings=None, dropout_rate=0.2, teacher_forcing_ratio=0.5):
+    def __init__(
+        self, vocab_size, embed_dim, hidden_size, seq_max_len=60,
+        num_layers=1, embeddings=None, dropout_rate=0.2,
+        teacher_forcing_ratio=1., softmax_temperature=1.
+    ):
         super(Decoder, self).__init__()
         if embeddings is not None:
             print('using pretrained embeddings for decoder with shape: ', embeddings.shape)
@@ -65,6 +69,7 @@ class Decoder(nn.Module):
         self.softmax = nn.Softmax()
         self.seq_max_len = seq_max_len
         self.teacher_forcing_ratio = teacher_forcing_ratio
+        self.softmax_temperature = softmax_temperature
         # self.work_mode = work_mode
 
     def forward(self, all_hidden, last_hc, target_chunk, batch_size, feed_mode, work_mode='training', output_mode='argmax'):
@@ -100,33 +105,79 @@ class Decoder(nn.Module):
                 wid = torch.max(dec_unscaled_logits[-1], dim=1)[1]
                 dec_outputs.append(wid)
             elif output_mode == 'sampling':
-                dec_outputs.append(torch.multinomial(torch.exp(dec_unscaled_logits[-1]), 1).view(batch_size))
+                wid = torch.multinomial(
+                    torch.exp(dec_unscaled_logits[-1]), 1
+                ).view(batch_size)
+                dec_outputs.append(wid)
             else:
                 raise ValueError("Invalid output_mode: '{}'".format(output_mode))
 
-            # feedmode teacher_forcing
-            use_teacher_forcing = True if random.random() < self.teacher_forcing_ratio else False
-            if work_mode == 'training' and feed_mode == "teacher_forcing" and use_teacher_forcing:
-                dec_feed = target_chunk[:, t]
-                dec_feed_emb = target_chunk_emb[:, t]
+            if work_mode == 'test':
+                dec_feed = dec_outputs[-1]
+                dec_feed_emb = self.embedding(
+                    dec_feed.view(batch_size, 1)
+                ).view(batch_size, -1)
                 self.dec_feeds.append(dec_feed)
-            else:
-                wid = torch.max(dec_unscaled_logits[-1], dim=1)[1]
-                dec_feed = wid
-                dec_feed_emb = self.embedding(wid)
-                self.dec_feeds.append(wid)
+            elif work_mode == 'training':
+                use_teacher_forcing = True if random.random() < self.teacher_forcing_ratio else False
+                if use_teacher_forcing:
+                    dec_feed = target_chunk[:, t]
+                    dec_feed_emb = target_chunk_emb[:, t]
+                    self.dec_feeds.append(dec_feed)
+                else:
+                    if feed_mode in ['argmax', 'sampling']:
+                        if feed_mode == 'argmax':
+                            dec_feed = torch.max(dec_unscaled_logits[-1], dim=1)[1]
+                        elif feed_mode == 'sampling':
+                            dec_feed = torch.multinomial(
+                                F.softmax(dec_unscaled_logits[-1]), 1
+                            )
+                        dec_feed_emb = self.embedding(
+                            dec_feed.view(batch_size, 1)
+                        ).view(batch_size, -1)
+                        self.dec_feeds.append(dec_feed)
+                    elif feed_mode in ['softmax', 'gumbel', 'gumbel-st']:
+                        if feed_mode == 'softmax':
+                            dec_feed_distr = F.softmax(
+                                dec_unscaled_logits[-1] / self.softmax_temperature
+                            )
+                        elif feed_mode in ['gumbel', 'gumbel-st']:
+                            dec_feed_distr = gumbel_softmax_sample(
+                                F.softmax(dec_unscaled_logits[-1]),
+                                self.softmax_temperature,
+                                hard=(feed_mode == 'gumbel_st')
+                            )
+                        def_feed_emb = torch.matmul(
+                            dec_feed_distr, self.embedding.weight
+                        )
         return (
             torch.stack(dec_unscaled_logits, dim=1),
             torch.stack(dec_outputs, dim=1)
         )
 
 class Seq2SeqModel(nn.Module):
-    def __init__(self, vocab_size_encoder, vocab_size_decoder, embed_dim, hidden_size, enc_pre_emb=None, dec_pre_emb=None,
-                 num_layers_enc=1, num_layers_dec=1, dropout_rate=0.2, teacher_forcing_ratio=1):
+    def __init__(
+        self, vocab_size_encoder, vocab_size_decoder, embed_dim, hidden_size,
+        enc_pre_emb=None, dec_pre_emb=None,
+        num_layers_enc=1, num_layers_dec=1, dropout_rate=0.2,
+        feed_mode='argmax', baseline_feed_mode=None,
+        teacher_forcing_ratio=1.0
+    ):
         super(Seq2SeqModel, self).__init__()
-        self.encoder = CUDA_wrapper(Encoder(vocab_size_encoder, embed_dim, hidden_size, num_layers=num_layers_enc, embeddings=enc_pre_emb))
-        self.decoder = CUDA_wrapper(Decoder(vocab_size_decoder, embed_dim, hidden_size, num_layers=num_layers_dec, embeddings=dec_pre_emb,
-                                            dropout_rate=dropout_rate, teacher_forcing_ratio=teacher_forcing_ratio))
+        self.encoder = CUDA_wrapper(
+            Encoder(
+                vocab_size_encoder, embed_dim, hidden_size,
+                num_layers=num_layers_enc, embeddings=enc_pre_emb
+            )
+        )
+        self.decoder = CUDA_wrapper(
+            Decoder(
+                vocab_size_decoder, embed_dim, hidden_size,
+                num_layers=num_layers_dec, embeddings=dec_pre_emb,
+                dropout_rate=dropout_rate,
+                teacher_forcing_ratio=teacher_forcing_ratio
+            )
+        )
         self.vocab_size_encoder = vocab_size_encoder
         self.vocab_size_decoder = vocab_size_decoder
         self.embed_dim = embed_dim
@@ -136,6 +187,25 @@ class Seq2SeqModel(nn.Module):
         self.decoder.embedding.weight.data.uniform_(-initrange, initrange)
         self.decoder.output_proj.bias.data.fill_(0)
 
-    def forward(self, input_chunk, target_chunk, work_mode='training', feed_mode="teacher_forcing"):
+        self.feed_mode = feed_mode
+        self.baseline_feed_mode = baseline_feed_mode
+        self.teacher_forcing_ratio = teacher_forcing_ratio
+
+    def forward(self, input_chunk, target_chunk, work_mode='training'):
         all_hidden, last_hc = self.encoder(input_chunk)
-        return self.decoder(all_hidden, last_hc, target_chunk, self.encoder.batch_size, feed_mode, work_mode=work_mode)
+        if self.baseline_feed_mode is None or work_mode == 'test':
+            return self.decoder(
+                all_hidden, last_hc, target_chunk, self.encoder.batch_size,
+                feed_mode=self.feed_mode, work_mode=work_mode,
+                teacher_forcing_ratio=self.teacher_forcing_ratio
+            )
+        else:
+            return self.decoder(
+                all_hidden, last_hc, target_chunk, self.encoder.batch_size,
+                feed_mode=self.feed_mode, work_mode=work_mode,
+                teacher_forcing_ratio=self.teacher_forcing_ratio
+            ), self.decoder(
+                all_hidden, last_hc, target_chunk, self.encoder.batch_size,
+                feed_mode=self.baseline_feed_mode, work_mode=work_mode,
+                teacher_forcing_ratio=self.teacher_forcing_ratio
+            )

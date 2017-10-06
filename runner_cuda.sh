@@ -1,1 +1,1 @@
-CUDA_VISIBLE_DEVICES=$1 python notebook.py
+CUDA_VISIBLE_DEVICES=$1 python3 notebook.py
