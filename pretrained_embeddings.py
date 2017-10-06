@@ -40,14 +40,3 @@ def load_and_save(fasttext_file, output_file, vcb):
 load_and_save('data/fasttext/wiki.de.vec', 'my_de_emb', bg.vocab.src.word2id)
 # %%
 load_and_save('data/fasttext/wiki.en.vec', 'my_en_emb', bg.vocab.tgt.word2id)
-
-# %%
-# test loading
-# with open('data/fasttext/my_de_emb', 'rb') as f:
-#     data_new = pickle.load(f)
-# str(data_new.nbytes / 1E6) + ' MB'
-embed = nn.Embedding(*data_new.shape)
-# pretrained_weight is a numpy matrix of shape (num_embeddings, embedding_dim)
-embed.weight = nn.Parameter(torch.FloatTensor(data_new))
-embed.weight.requires_grad = False
-embed(torch.LongTensor([4]))
