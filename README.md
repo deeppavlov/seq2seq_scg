@@ -1,11 +1,11 @@
 <h1>Seq2Seq</h1>
 
 <h2> Requirements </h2>
-We strongly recommend use anaconda, as the easiest way to setting up requirements.
+We strongly recommend use anaconda, as the easiest way for setting up requirements.
 
 1) pytorch
 
-... to be continued
+... etc
 <h2>Setting up</h2>
 1) Place IWSLT german->english dataset in the directory:
 
