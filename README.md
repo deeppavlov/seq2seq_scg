@@ -57,4 +57,6 @@ run this commands:
 
 python BLEU_scorer.py
 
+(тут короче в 42 строчке поменяй на файлик модели который тебе нужен. Потом добавлю скрипт с параметром)
+
 python bleu_wrapper.py
