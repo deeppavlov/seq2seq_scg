@@ -3,6 +3,7 @@
 # %load_ext autoreload
 # %autoreload 2
 # plt.rcParams['figure.figsize'] = (15, 9)
+import numpy as np
 import torch
 from data_generator import BatchGenerator # data generator for translation
 from vocab import Vocab, VocabEntry
@@ -13,6 +14,7 @@ from torch import optim
 import torch.autograd as autograd
 #from text_reverse_data_generator import get_data_generators, revert_words # data generator for text_reverse
 import torch.nn as nn
+import torch.nn.functional as F
 import datetime
 from util import id_to_char, char_to_id, masked_cross_entropy
 import pickle
@@ -52,7 +54,7 @@ def bleu_score(unscaled_logits, outputs, rev_chunk_batch_torch, vcb_id2word):
 # dec(all_hidden, all_cell, b, enc.batch_size)
 # %%
 
-train_batch_size = 200 # that was 256
+train_batch_size = 128 # that was 200
 eval_batch_size = 64
 test_batch_size = 64
 decode_batch_size = 8
@@ -92,9 +94,9 @@ num_runs = 1
 #num_steps = 60000
 #print_skip = 50
 #save_per_step = 10000
-num_steps = 200
-print_skip = 50
-save_per_step = 100
+num_steps = 5000
+print_skip = 100
+save_per_step = 1000
 
 train_losses = []
 train_accs = []
@@ -102,37 +104,34 @@ train_accs = []
 eval_losses = []
 eval_accs = []
 
-model_params = {
-    'vocab_size_encoder': vocab_size_encoder,
-    'vocab_size_decoder': vocab_size_decoder,
-    #'enc_pre_emb': de_emb,
-    #'dec_pre_emb': en_emb,
-    'embed_dim': 128,
-    'hidden_size': 256
-}
+NOT_AVAILABLE = 'NA'
 
-feed_mode = 'argmax'
-teacher_forcing_ratio = 1.0
-reinforce_strategy = 'none' #'argmax_advantage'
+feed_mode = 'gumbel-st'
+tf_ratio_range = (0.0, 0.0)
+reinforce_strategy = 'argmax_advantage'
 if feed_mode != 'sampling':
-    reinforce_strategy = ''
+    reinforce_strategy = NOT_AVAILABLE
+softmax_t_range = (1.0, 0.01)
+if feed_mode in ['argmax', 'sampling']:
+    softmax_t_range = NOT_AVAILABLE
 baseline_feed_mode = None
 if reinforce_strategy == 'argmax_advantage':
     baseline_feed_mode = 'argmax'
 attention_mode = 'soft'
 
-mode_name = feed_mode + str(teacher_forcing_ratio) + reinforce_strategy + attention_mode
+mode_name = 'feed=' + feed_mode + '__tf_ratio=' + str(tf_ratio_range) + '__softmax_t=' + str(softmax_t_range) + '__reinforce=' + reinforce_strategy + '__attn=' + attention_mode
 
 do_eval = True
+do_print = False
 
 av_advantage = None
 std_advantage = None
 
 grad_norms = None
 
-train_batch_gen, eval_batch_gen = get_data_generators(
-    train_batch_size, chunk_length, eval_batch_size
-)
+#train_batch_gen, eval_batch_gen = get_data_generators(
+#    train_batch_size, chunk_length, eval_batch_size
+#)
 
 with open('data/fasttext/my_de_emb', 'rb') as f:
     de_emb = pickle.load(f)
@@ -140,8 +139,27 @@ with open('data/fasttext/my_de_emb', 'rb') as f:
 with open('data/fasttext/my_en_emb', 'rb') as f:
     en_emb = pickle.load(f)
 
-# the_model = Seq2SeqModel(vocab_size_encoder=10, vocab_size_decoder=10, embed_dim=8, hidden_size=48)
+model_params = {
+    'vocab_size_encoder': vocab_size_encoder,
+    'vocab_size_decoder': vocab_size_decoder,
+    'enc_pre_emb': de_emb,
+    'dec_pre_emb': en_emb,
+    'embed_dim': 128,
+    'hidden_size': 256
+}
+
+import os
+import pickle
+
+save_path = './saved_models/' + mode_name
+if not os.path.exists(save_path):
+    os.makedirs(save_path)
+write_path = './output/' + mode_name
+if not os.path.exists(write_path):
+    os.makedirs(write_path)
+
 # %% TRAINING
+print(mode_name)
 for run in range(num_runs):
     print('Run', run)
     print()
@@ -164,7 +182,6 @@ for run in range(num_runs):
     model = CUDA_wrapper(
         Seq2SeqModel(
             **model_params,
-            teacher_forcing_ratio=teacher_forcing_ratio,
             feed_mode=feed_mode, baseline_feed_mode=baseline_feed_mode
         )
     )
@@ -175,27 +192,36 @@ for run in range(num_runs):
     grad_norms = []
     grad_norms_biased = []
 
-    init_lr = 0.0001
+    init_lr = 0.001
     lr = init_lr
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
 
     for step in range(num_steps):
-        ######################## words_reverser ########################
-        # chunk_batch = next(train_batch_gen)
-        # rev_chunk_batch = revert_words(chunk_batch)
-        # chunk_batch_torch = autograd.Variable(CUDA_wrapper(torch.from_numpy(chunk_batch)), requires_grad=False)
-        # rev_chunk_batch_torch = autograd.Variable(CUDA_wrapper(torch.from_numpy(rev_chunk_batch)), requires_grad=False)
-        ######################## end words reverser ########################
+        if softmax_t_range != NOT_AVAILABLE:
+            softmax_t = softmax_t_range[0] * (softmax_t_range[1] / softmax_t_range[0]) ** (step / num_steps)
+        else:
+            softmax_t = 0.0
+        tf_ratio = tf_ratio_range[0] + (tf_ratio_range[1] - tf_ratio_range[0]) * (step / num_steps)
+
         chunk_batch_torch, tgt_batch_torch, tgt_len = bg.next_train()
+        #print(chunk_batch_torch.size())
+        #print(tgt_batch_torch.size())
+        true_train_batch_size, true_chunk_length = chunk_batch_torch.size()
+        true_train_batch_size, true_tgt_length = tgt_batch_torch.size()
 
         if baseline_feed_mode is not None:
             (unscaled_logits, outputs), (unscaled_logits_baseline, outputs_baseline) = model(
-                chunk_batch_torch, tgt_batch_torch
+                chunk_batch_torch, tgt_batch_torch,
+                softmax_temperature=softmax_t,
+            	teacher_forcing_ratio=tf_ratio
             )
         else:
             unscaled_logits, outputs = model(
-                chunk_batch_torch, tgt_batch_torch
+                chunk_batch_torch, tgt_batch_torch,
+                softmax_temperature=softmax_t,
+            	teacher_forcing_ratio=tf_ratio
             )
+        
         if use_masked_loss:
             # unscaled_logits.data.shape
             # rev_chunk_batch.data.shape
@@ -204,40 +230,51 @@ for run in range(num_runs):
             train_loss = loss_function(unscaled_logits, tgt_batch_torch, tgt_len)
         else:
             train_loss = loss_function(unscaled_logits.view(-1, vocab_size_decoder), tgt_batch_torch.view(-1))
+        
         train_acc = torch.mean(torch.eq(outputs, tgt_batch_torch).float())
-        if reinforce_strategy == 'none':
-            for dec_feed in model.decoder.dec_feeds:
-                dec_feed.reinforce(CUDA_wrapper(torch.zeros(train_batch_size, 1)))
-        elif reinforce_strategy == 'argmax_advantage':
-            tgt_batch_torch_one_hot = CUDA_wrapper(
-                torch.zeros(
-                    train_batch_size, chunk_length, vocab_size_decoder
+        
+        if reinforce_strategy != NOT_AVAILABLE:
+            if reinforce_strategy == 'none':
+                for dec_feed in model.decoder.dec_feeds:
+                    dec_feed.reinforce(
+                        CUDA_wrapper(torch.zeros(true_train_batch_size, 1))
+                    )
+            elif reinforce_strategy == 'argmax_advantage':
+                tgt_batch_torch_one_hot = CUDA_wrapper(
+                    torch.zeros(
+                        true_train_batch_size, true_tgt_length, vocab_size_decoder
+                    )
                 )
-            )
-            tgt_batch_torch_one_hot.scatter_(
-                2, tgt_batch_torch.data.view(train_batch_size, chunk_length, 1), 1
-            )
-            elemwise_train_loss = (-1) * F.log_softmax(
-                unscaled_logits.data.view(-1, vocab_size_decoder)
-            ).data.view(train_batch_size, chunk_length, vocab_size_decoder)[tgt_batch_torch_one_hot.byte()].view(
-                train_batch_size, chunk_length
-            )
-            elemwise_train_loss_baseline = (-1) * F.log_softmax(
-                unscaled_logits_baseline.data.view(-1, vocab_size_decoder)
-            ).data.view(train_batch_size, chunk_length, vocab_size_decoder)[tgt_batch_torch_one_hot.byte()].view(
-                train_batch_size, chunk_length
-            )
-            normed_elemwise_advantage = ((elemwise_train_loss_baseline - elemwise_train_loss) /
-                                         (train_batch_size * chunk_length))
-            sum_normed_elemwise_advantage = torch.sum(normed_elemwise_advantage, dim=1)
-            cumsum_normed_elemwise_advantage = torch.cumsum(normed_elemwise_advantage, dim=1)
-            for t, dec_feed in enumerate(model.decoder.dec_feeds):
-                dec_feed.reinforce(
-                    (sum_normed_elemwise_advantage - cumsum_normed_elemwise_advantage[:, t]).view(train_batch_size, 1)
+                tgt_batch_torch_one_hot.scatter_(
+                    2, tgt_batch_torch.data.view(true_train_batch_size, true_tgt_length, 1), 1
                 )
+                elemwise_train_loss = (-1) * F.log_softmax(
+                    unscaled_logits.data.view(-1, vocab_size_decoder)
+                ).data.view(true_train_batch_size, true_tgt_length, vocab_size_decoder)[tgt_batch_torch_one_hot.byte()].view(
+                    true_train_batch_size, true_tgt_length
+                )
+                elemwise_train_loss_baseline = (-1) * F.log_softmax(
+                    unscaled_logits_baseline.data.view(-1, vocab_size_decoder)
+                ).data.view(true_train_batch_size, true_tgt_length, vocab_size_decoder)[tgt_batch_torch_one_hot.byte()].view(
+                    true_train_batch_size, true_tgt_length
+                )
+                normed_elemwise_advantage = (
+                    (elemwise_train_loss_baseline - elemwise_train_loss) /
+                    (true_train_batch_size * true_tgt_length)
+                )
+                sum_normed_elemwise_advantage = torch.sum(
+                    normed_elemwise_advantage, dim=1
+                )
+                cumsum_normed_elemwise_advantage = torch.cumsum(
+                    normed_elemwise_advantage, dim=1
+                )
+                for t, dec_feed in enumerate(model.decoder.dec_feeds):
+                    dec_feed.reinforce(
+                        (sum_normed_elemwise_advantage - cumsum_normed_elemwise_advantage[:, t]).view(true_train_batch_size, 1)
+                    )
 
-            av_advantage.append(torch.mean(elemwise_train_loss_baseline - elemwise_train_loss, dim=0).cpu().numpy())
-            std_advantage.append(torch.std(elemwise_train_loss_baseline - elemwise_train_loss, dim=0).cpu().numpy())
+                av_advantage.append(torch.mean(elemwise_train_loss_baseline - elemwise_train_loss, dim=0).cpu().numpy())
+                std_advantage.append(torch.std(elemwise_train_loss_baseline - elemwise_train_loss, dim=0).cpu().numpy())
 
         optimizer.zero_grad()
         train_loss.backward()
@@ -249,14 +286,6 @@ for run in range(num_runs):
         cum_train_loss += train_losses[-1][-1]
         cum_train_acc += train_accs[-1][-1]
         if do_eval:
-            ######################## words_reverser ########################
-            # chunk_batch = next(eval_batch_gen)
-            # rev_chunk_batch = revert_words(chunk_batch)
-            #
-            # chunk_batch_torch = autograd.Variable(CUDA_wrapper(torch.from_numpy(chunk_batch)), requires_grad=False)
-            # rev_chunk_batch_torch = autograd.Variable(CUDA_wrapper(torch.from_numpy(rev_chunk_batch)), requires_grad=False)
-            ######################## end words_reverser ########################
-
             chunk_batch_torch, tgt_batch_torch, tgt_len = bg.next_eval()
 
             unscaled_logits, outputs = model(
@@ -285,6 +314,9 @@ for run in range(num_runs):
         if (step + 1) % print_skip == 0:
             print('Step', step + 1)
 
+            print('softmax temperature: {:.2f}'.format(softmax_t))
+            print('teacher-forcing ratio: {:.2f}'.format(tf_ratio))
+
             print('Train loss: {:.2f}; train accuracy: {:.2f}'.format(
                 cum_train_loss / print_skip, cum_train_acc / print_skip
             ))
@@ -300,40 +332,43 @@ for run in range(num_runs):
                     cum_eval_acc = 0
                     cum_eval_bleu = 0
 
-                    outputs_np = outputs.data.cpu().numpy()
-                    cur_decode_batch_size = min(decode_batch_size, min(len(rev_chunk_batch_torch), len(outputs_np)))
-                    for i in range(cur_decode_batch_size):
-                        print('{}\n|  vs  |\n{}'.format(
-                            ' '.join([bg.vocab.tgt.id2word[k.data[0]] for k in rev_chunk_batch_torch[i]]),
-                            ' '.join([bg.vocab.tgt.id2word[k] for k in outputs_np[i]])
-                        ))
+                    if do_print:
+                        outputs_np = outputs.data.cpu().numpy()
+                        cur_decode_batch_size = min(
+                            decode_batch_size,
+                            min(len(tgt_batch_torch), len(outputs_np))
+                        )
+                        for i in range(cur_decode_batch_size):
+                            print('{}\n|  vs  |\n{}'.format(
+                                ' '.join([bg.vocab.tgt.id2word[k.data[0]] for k in tgt_batch_torch[i]]),
+                                ' '.join([bg.vocab.tgt.id2word[k] for k in outputs_np[i]])
+                            ))
 
                 else:
-                    print('Eval loss: {:.2f}; eval accuracy: {:.2f}'.format(
-                        cum_eval_loss / print_skip, cum_eval_acc / print_skip
-                    ))
-                    cum_eval_loss = 0
-                    cum_eval_acc = 0
-
-                    outputs_np = outputs.data.cpu().numpy()
-                    for i in range(decode_batch_size):
-                        print('{}|  vs  |{}'.format(
-                            ''.join(list(map(id_to_char, chunk_batch[i]))),
-                            ''.join(list(map(id_to_char, outputs_np[i])))
-                        ))
+                    raise ValueError('Unknown task: {}'.format(task))
 
             print('{:.2f}s from last print'.format(time() - last_print_time))
             last_print_time = time()
             print()
         if (step + 1) % save_per_step == 0:
             print('perform saving the model:')
-            torch.save(model.state_dict(), "./saved_model_step=" + str(step)  + "_time=" + str(datetime.datetime.now()))
+            torch.save(model.state_dict(), save_path + "/step=" + str(step))
             print('model saved')
 
-import pickle
+            eval_losses_mean = np.mean(eval_losses, axis=0)
+            eval_losses_std = np.std(eval_losses, axis=0)
 
-if not os.path.exists('./' + mode_name):
-    os.makedirs('./' + mode_name)
-for name in ['train_losses', 'train_accs', 'eval_losses', 'eval_accs']:
-    with open(mode_name + '/' + name + '.dat', 'wb') as f:
-        pickle.dump(eval(name), f)
+            eval_accs_mean = np.mean(eval_accs, axis=0)
+            eval_accs_std = np.std(eval_accs, axis=0)
+
+            train_losses_mean = np.mean(train_losses, axis=0)
+            train_losses_std = np.std(train_losses, axis=0)
+
+            train_accs_mean = np.mean(train_accs, axis=0)
+            train_accs_std = np.std(train_accs, axis=0)
+
+            for name in ['train_losses', 'train_accs', 'eval_losses', 'eval_accs']:
+                for suffix in ['', '_mean', '_std']:
+                    with open(write_path + '/' + name + suffix + '.dat', 'wb') as f:
+                        pickle.dump(eval(name + suffix), f)
+            print('output written')
