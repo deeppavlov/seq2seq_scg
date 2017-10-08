@@ -108,18 +108,24 @@ NOT_AVAILABLE = 'NA'
 
 feed_mode = 'gumbel-st'
 tf_ratio_range = (0.0, 0.0)
-reinforce_strategy = 'argmax_advantage'
+feed_baseline = 'argmax'
 if feed_mode != 'sampling':
-    reinforce_strategy = NOT_AVAILABLE
+    feed_baseline = NOT_AVAILABLE
 softmax_t_range = (1.0, 0.01)
 if feed_mode in ['argmax', 'sampling']:
     softmax_t_range = NOT_AVAILABLE
 baseline_feed_mode = None
-if reinforce_strategy == 'argmax_advantage':
+if feed_baseline == 'argmax':
     baseline_feed_mode = 'argmax'
-attention_mode = 'soft'
+attention_mode = 'hard'
+attention_baseline = 'argmax'
+if attention_mode != 'hard':
+    attention_baseline = NOT_AVAILABLE
+baseline_attention_mode = None
+if attention_baseline == 'argmax':
+    baseline_attention_mode = 'argmax'
 
-mode_name = 'feed=' + feed_mode + '__tf_ratio=' + str(tf_ratio_range) + '__softmax_t=' + str(softmax_t_range) + '__reinforce=' + reinforce_strategy + '__attn=' + attention_mode
+mode_name = 'feed=' + feed_mode + '__tf_ratio=' + str(tf_ratio_range) + '__softmax_t=' + str(softmax_t_range) + '__feed_baseline=' + feed_baseline + '__attn=' + attention_mode + '__attn_baseline=' + attention_baseline
 
 do_eval = True
 do_print = False
@@ -182,7 +188,10 @@ for run in range(num_runs):
     model = CUDA_wrapper(
         Seq2SeqModel(
             **model_params,
-            feed_mode=feed_mode, baseline_feed_mode=baseline_feed_mode
+            feed_mode=feed_mode, 
+            baseline_feed_mode=baseline_feed_mode,
+            attention_mode=attention_mode, 
+            baseline_attention_mode = baseline_attention_mode
         )
     )
 
@@ -209,18 +218,13 @@ for run in range(num_runs):
         true_train_batch_size, true_chunk_length = chunk_batch_torch.size()
         true_train_batch_size, true_tgt_length = tgt_batch_torch.size()
 
-        if baseline_feed_mode is not None:
-            (unscaled_logits, outputs), (unscaled_logits_baseline, outputs_baseline) = model(
-                chunk_batch_torch, tgt_batch_torch,
-                softmax_temperature=softmax_t,
-            	teacher_forcing_ratio=tf_ratio
-            )
-        else:
-            unscaled_logits, outputs = model(
-                chunk_batch_torch, tgt_batch_torch,
-                softmax_temperature=softmax_t,
-            	teacher_forcing_ratio=tf_ratio
-            )
+        (unscaled_logits, outputs), \
+        (unscaled_logits_feed_baseline, outputs_feed_baseline), \
+        (unscaled_logits_attn_baseline, outputs_attn_baseline) = model(
+            chunk_batch_torch, tgt_batch_torch,
+            softmax_temperature=softmax_t,
+            teacher_forcing_ratio=tf_ratio
+        )
         
         if use_masked_loss:
             # unscaled_logits.data.shape
@@ -233,13 +237,13 @@ for run in range(num_runs):
         
         train_acc = torch.mean(torch.eq(outputs, tgt_batch_torch).float())
         
-        if reinforce_strategy != NOT_AVAILABLE:
-            if reinforce_strategy == 'none':
+        if feed_baseline != NOT_AVAILABLE:
+            if feed_baseline == 'no-reinforce':
                 for dec_feed in model.decoder.dec_feeds:
                     dec_feed.reinforce(
                         CUDA_wrapper(torch.zeros(true_train_batch_size, 1))
                     )
-            elif reinforce_strategy == 'argmax_advantage':
+            elif feed_baseline == 'argmax':
                 tgt_batch_torch_one_hot = CUDA_wrapper(
                     torch.zeros(
                         true_train_batch_size, true_tgt_length, vocab_size_decoder
@@ -253,13 +257,13 @@ for run in range(num_runs):
                 ).data.view(true_train_batch_size, true_tgt_length, vocab_size_decoder)[tgt_batch_torch_one_hot.byte()].view(
                     true_train_batch_size, true_tgt_length
                 )
-                elemwise_train_loss_baseline = (-1) * F.log_softmax(
-                    unscaled_logits_baseline.data.view(-1, vocab_size_decoder)
+                elemwise_train_loss_feed_baseline = (-1) * F.log_softmax(
+                    unscaled_logits_feed_baseline.data.view(-1, vocab_size_decoder)
                 ).data.view(true_train_batch_size, true_tgt_length, vocab_size_decoder)[tgt_batch_torch_one_hot.byte()].view(
                     true_train_batch_size, true_tgt_length
                 )
                 normed_elemwise_advantage = (
-                    (elemwise_train_loss_baseline - elemwise_train_loss) /
+                    (elemwise_train_loss_feed_baseline - elemwise_train_loss) /
                     (true_train_batch_size * true_tgt_length)
                 )
                 sum_normed_elemwise_advantage = torch.sum(
@@ -273,8 +277,48 @@ for run in range(num_runs):
                         (sum_normed_elemwise_advantage - cumsum_normed_elemwise_advantage[:, t]).view(true_train_batch_size, 1)
                     )
 
-                av_advantage.append(torch.mean(elemwise_train_loss_baseline - elemwise_train_loss, dim=0).cpu().numpy())
-                std_advantage.append(torch.std(elemwise_train_loss_baseline - elemwise_train_loss, dim=0).cpu().numpy())
+                av_advantage.append(torch.mean(elemwise_train_loss_feed_baseline - elemwise_train_loss, dim=0).cpu().numpy())
+                std_advantage.append(torch.std(elemwise_train_loss_feed_baseline - elemwise_train_loss, dim=0).cpu().numpy())
+            else:
+                raise ValueError('Unknown feed_baseline: {}'.format(feed_baseline))
+
+        if attention_baseline != NOT_AVAILABLE:
+            if attention_baseline == 'argmax':
+                tgt_batch_torch_one_hot = CUDA_wrapper(
+                    torch.zeros(
+                        true_train_batch_size, true_tgt_length, vocab_size_decoder
+                    )
+                )
+                tgt_batch_torch_one_hot.scatter_(
+                    2, tgt_batch_torch.data.view(true_train_batch_size, true_tgt_length, 1), 1
+                )
+                elemwise_train_loss = (-1) * F.log_softmax(
+                    unscaled_logits.data.view(-1, vocab_size_decoder)
+                ).data.view(true_train_batch_size, true_tgt_length, vocab_size_decoder)[tgt_batch_torch_one_hot.byte()].view(
+                    true_train_batch_size, true_tgt_length
+                )
+                elemwise_train_loss_attn_baseline = (-1) * F.log_softmax(
+                    unscaled_logits_attn_baseline.data.view(-1, vocab_size_decoder)
+                ).data.view(true_train_batch_size, true_tgt_length, vocab_size_decoder)[tgt_batch_torch_one_hot.byte()].view(
+                    true_train_batch_size, true_tgt_length
+                )
+                normed_elemwise_advantage = (
+                    (elemwise_train_loss_attn_baseline - elemwise_train_loss) /
+                    (true_train_batch_size * true_tgt_length)
+                )
+                sum_normed_elemwise_advantage = torch.sum(
+                    normed_elemwise_advantage, dim=1
+                )
+                cumsum_normed_elemwise_advantage = torch.cumsum(
+                    normed_elemwise_advantage, dim=1
+                )
+                for t, attn_idx in enumerate(model.decoder.attention_idx):
+                    attn_idx.reinforce(
+                        (sum_normed_elemwise_advantage - cumsum_normed_elemwise_advantage[:, t]).view(true_train_batch_size, 1)
+                    )
+
+            else:
+                raise ValueError('Unknown attention_baseline: {}'.format(attention_baseline))
 
         optimizer.zero_grad()
         train_loss.backward()
@@ -288,7 +332,9 @@ for run in range(num_runs):
         if do_eval:
             chunk_batch_torch, tgt_batch_torch, tgt_len = bg.next_eval()
 
-            unscaled_logits, outputs = model(
+            (unscaled_logits, outputs), \
+            (unscaled_logits_feed_baseline, outputs_feed_baseline), \
+            (unscaled_logits_attn_baseline, outputs_attn_baseline) = model(
                 chunk_batch_torch, tgt_batch_torch,
                 work_mode='test'
             )

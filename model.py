@@ -17,7 +17,7 @@ def sample_gumbel(input):
     noise.add_(eps).log_().neg_()
     return autograd.Variable(noise)
 
-def gumbel_softmax_sample(input, temperature, hard=False):
+def gumbel_softmax_sample(input, temperature=1.0, hard=False):
     noise = sample_gumbel(input)
     x = (input + noise) / temperature
     x = F.softmax(x)
@@ -92,6 +92,7 @@ class Decoder(nn.Module):
     def forward(
         self, all_hidden, last_hc, target_chunk, batch_size,
         feed_mode, work_mode='training', output_mode='argmax',
+        attention_mode='soft',
         dropout_rate=0.2, softmax_temperature=1.0,
         teacher_forcing_ratio=1.0
     ):
@@ -112,13 +113,36 @@ class Decoder(nn.Module):
         dec_c = torch.cat(last_hc[1], 1)#all_cell[:, -1, :]
         if work_mode != 'training':
             seq_length = self.seq_max_len
-        self.attention = []
+        self.attention_idx = []
         for t in range(seq_length):
             ## calculate attention
-            attention = self.W_attention(all_hidden) #  batch_size x inp_seq_length X hidden_size * 2
-            attention = torch.bmm(attention, dec_h.unsqueeze(2)) #  batch_size x inp_seq_length x 1
-            attention = self.softmax(attention.view(batch_size, inp_seq_len))
-            self.attention.append(attention)
+            attention_scores = self.W_attention(all_hidden) #  batch_size x inp_seq_length X hidden_size * 2
+            attention_scores = torch.bmm(attention_scores, dec_h.unsqueeze(2)) #  batch_size x inp_seq_length x 1
+            attention_scores = self.softmax(
+                attention_scores.view(batch_size, inp_seq_len)
+            )
+            if attention_mode == 'soft':
+                attention = attention_scores
+            elif attention_mode in ['gumbel', 'gumbel-st']:
+                attention = gumbel_softmax_sample(
+                    attention_scores,
+                    # do we need temperature here, or it will be learned implicitly?
+                    hard=(attention_mode == 'gumbel-st')
+                )
+            elif attention_mode in ['hard', 'argmax']:
+                if attention_mode == 'hard':
+                    attention_idx = torch.multinomial(attention_scores, 1)
+                elif attention_mode == 'argmax':
+                    attention_idx = torch.max(attention_scores, 1)[1]
+                attention = CUDA_wrapper(
+                    autograd.Variable(
+                        torch.Tensor(
+                            batch_size, inp_seq_len
+                        ).zero_(), requires_grad=False
+                    )
+                )
+                attention.scatter_(1, attention_idx.data.view(batch_size, 1), 1)
+                self.attention_idx.append(attention_idx)
             context_vector = torch.bmm(attention.view(batch_size, 1, inp_seq_len), all_hidden) # [batch_size x 1 x hidden_size * 2]
             context_vector = context_vector.view(batch_size, self.hidden_size * 2)
             concatenated_with_attention_feed = torch.cat((context_vector, self.dropout(dec_feed_emb)), dim=1) # [batch_size x hidden_size * 2 + embed_size]
@@ -182,7 +206,8 @@ class Seq2SeqModel(nn.Module):
         self, vocab_size_encoder, vocab_size_decoder, embed_dim, hidden_size,
         enc_pre_emb=None, dec_pre_emb=None,
         num_layers_enc=1, num_layers_dec=1,
-        feed_mode='argmax', baseline_feed_mode=None
+        feed_mode='argmax', baseline_feed_mode=None,
+        attention_mode='soft', baseline_attention_mode=None
     ):
         super(Seq2SeqModel, self).__init__()
         self.encoder = CUDA_wrapper(
@@ -208,6 +233,8 @@ class Seq2SeqModel(nn.Module):
 
         self.feed_mode = feed_mode
         self.baseline_feed_mode = baseline_feed_mode
+        self.attention_mode = attention_mode
+        self.baseline_attention_mode = baseline_attention_mode
 
     def forward(
         self, input_chunk, target_chunk, work_mode='training',
@@ -218,22 +245,35 @@ class Seq2SeqModel(nn.Module):
         if work_mode == 'test':
             dropout_rate = 0.0
 
-        compute_baseline = self.baseline_feed_mode is not None and work_mode != 'test'
-        if compute_baseline:
-            baseline_output = self.decoder(
+        need_feed_baseline = self.baseline_feed_mode is not None and work_mode != 'test'
+        need_attn_baseline = self.baseline_attention_mode is not None and work_mode != 'test'
+
+        if need_feed_baseline:
+            feed_baseline_output = self.decoder(
                 all_hidden, last_hc, target_chunk, self.encoder.batch_size,
                 feed_mode=self.baseline_feed_mode, work_mode=work_mode,
+                attention_mode=self.attention_mode,
                 dropout_rate=dropout_rate, softmax_temperature=softmax_temperature,
                 teacher_forcing_ratio=teacher_forcing_ratio
             )
+        else:
+            feed_baseline_output = (None, None)
+        if need_attn_baseline:
+            attn_baseline_output = self.decoder(
+                all_hidden, last_hc, target_chunk, self.encoder.batch_size,
+                feed_mode=self.feed_mode, work_mode=work_mode,
+                attention_mode=self.baseline_attention_mode,
+                dropout_rate=dropout_rate, softmax_temperature=softmax_temperature,
+                teacher_forcing_ratio=teacher_forcing_ratio
+            )
+        else:
+            attn_baseline_output = (None, None)
         output = self.decoder(
             all_hidden, last_hc, target_chunk, self.encoder.batch_size,
             feed_mode=self.feed_mode, work_mode=work_mode,
+            attention_mode=self.attention_mode,
             dropout_rate=dropout_rate, softmax_temperature=softmax_temperature,
             teacher_forcing_ratio=teacher_forcing_ratio
         )
 
-        if not compute_baseline:
-            return output
-        else:
-            return output, baseline_output
+        return output, feed_baseline_output, attn_baseline_output
