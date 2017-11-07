@@ -1,13 +1,17 @@
-<h1>Seq2Seq</h1>
+<h1>Seq2Seq Neural Machine Translation model with different optimization techniques</h1>
+
+This is our implementation of seq2seq neural machine translation model with different optimization techniques. For details, see the corresponding NIPS'17 workshop paper https://www.overleaf.com/read/ncpvyxbhhjgq
 
 <h2> Requirements </h2>
-We strongly recommend use anaconda, as the easiest way for setting up requirements.
+We recommend to use anaconda, as the easiest way for setting up requirements.
 
-1) pytorch
+1) python 3.6
+2) pytorch 0.2
 
-... etc
 <h2>Setting up</h2>
-1) Place IWSLT german->english dataset in the directory:
+
+1) Get IWSLT'14 german->english dataset https://wit3.fbk.eu/archive/2014-01/texts/de/en/de-en.tgz
+Then place it in the directory:
 
 data/nmt_iwslt
 
@@ -17,11 +21,9 @@ data/nmt_iwslt
 python vocab.py --train_src data/nmt_iwslt/train.de-en.de --train_tgt data/nmt_iwslt/train.de-en.en --output data/nmt_iwslt/vocab.bin
 
 
-<!-- cp vocab.bin data/nmt_iwslt/vocab.bin
+3) Download pretrained word vectors:
 
-rm vocab.bin -->
-
-2) Download pretrained word vectors:
+mkdir data/fasttext
 
 cd data/fasttext
 
@@ -29,34 +31,32 @@ wget https://s3-us-west-1.amazonaws.com/fasttext-vectors/wiki.de.vec
 
 wget https://s3-us-west-1.amazonaws.com/fasttext-vectors/wiki.en.vec
 
-3)
-(TODO: create script with argparse output param)
-
-To create pickle files for pretrained embeddings run(they are just numpy arrays):
-
-
-cp my_de_emb data/fasttext/my_de_emb
-
-cp my_en_emb data/fasttext/my_en_emb
 
 <h2> Usage </h2>
-1) Run training
 
-runner_cuda.sh gpu_id
+1) Specify train and model parameters in param_provider.py
+
+2) Run training
+
+To train on CPU just execute notebook.py:
+
+python notebook.py
+
+To train on GPU:
+
+source runner_cuda.sh gpu_id
 
 for example:
 
- runner_cuda.sh 0
+source runner_cuda.sh 0
 
-to run on the gpu with id 0.
+to run on GPU with id 0.
 
-2)
+3) Evaluate model on test dataset
 
-for now one can only evaluate model on eval(not on the test)
-run this commands:
+First, specify the model you want to evaluate as a 'start_model' in param_provider.py
+Then run these two commands in order to evaluate BLEU score:
 
 python BLEU_scorer.py
-
-(тут короче в 42 строчке поменяй на файлик модели который тебе нужен. Потом добавлю скрипт с параметром)
 
 python bleu_wrapper.py

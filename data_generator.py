@@ -1,6 +1,3 @@
-# %load_ext autoreload
-# %autoreload 2
-
 import numpy as np
 import torch
 from vocab import Vocab, VocabEntry
@@ -55,18 +52,20 @@ class BatchGenerator:
         except StopIteration:
             self.data_gen_eval = self.eval_data_generator(batch_size=self.eval_batch_size)
             src_sents, tgt_sents = next(self.data_gen_eval)
-        inp_src = to_input_variable(src_sents, vocab=self.vocab.src)
-        inp_tgt = to_input_variable(tgt_sents, vocab=self.vocab.tgt)
+        inp_src = to_input_variable(src_sents, vocab=self.vocab.src, is_test=True)
+        inp_tgt = to_input_variable(tgt_sents, vocab=self.vocab.tgt, is_test=True)
         tgt_len = [len(cur_snt) for cur_snt in tgt_sents]
         return torch.transpose(inp_src, 0, 1).contiguous(), torch.transpose(inp_tgt, 0, 1).contiguous(), tgt_len
 
     def next_test(self):
+        stop_iter_flag = False
         try:
             src_sents, tgt_sents = next(self.data_gen_test)
         except StopIteration:
             self.data_gen_test = self.test_data_generator(batch_size=self.test_batch_size)
             src_sents, tgt_sents = next(self.data_gen_test)
-        inp_src = to_input_variable(src_sents, vocab=self.vocab.src)
-        inp_tgt = to_input_variable(tgt_sents, vocab=self.vocab.tgt)
+            stop_iter_flag = True
+        inp_src = to_input_variable(src_sents, vocab=self.vocab.src, is_test=True)
+        inp_tgt = to_input_variable(tgt_sents, vocab=self.vocab.tgt, is_test=True)
         tgt_len = [len(cur_snt) for cur_snt in tgt_sents]
-        return torch.transpose(inp_src, 0, 1).contiguous(), torch.transpose(inp_tgt, 0, 1).contiguous(), tgt_len
+        return stop_iter_flag, tgt_sents, torch.transpose(inp_src, 0, 1).contiguous(), torch.transpose(inp_tgt, 0, 1).contiguous(), tgt_len

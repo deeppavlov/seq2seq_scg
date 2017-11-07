@@ -15,4 +15,4 @@ References
 #     reference_file.write(output)
 
 from os import system
-system('./multi-bleu.perl reference < output')
+system('perl multi-bleu.perl reference < output')

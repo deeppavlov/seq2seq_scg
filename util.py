@@ -1,8 +1,26 @@
 from collections import defaultdict
+
 import numpy as np
-from torch.autograd import Variable
+
 import torch
-from torch.nn import functional
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.autograd as autograd
+
+from bleu import compute_bleu
+
+
+if torch.cuda.is_available():
+    Tensor = torch.cuda.FloatTensor
+    FloatTensor = torch.cuda.FloatTensor
+    LongTensor = torch.cuda.LongTensor
+    ByteTensor = torch.cuda.ByteTensor
+else:
+    Tensor = torch.Tensor
+    FloatTensor = torch.FloatTensor
+    LongTensor = torch.LongTensor
+    ByteTensor = torch.ByteTensor
+
 
 def CUDA_wrapper(tensor):
     use_cuda = torch.cuda.is_available()
@@ -11,28 +29,11 @@ def CUDA_wrapper(tensor):
     else:
         return tensor
 
-EOS_id = 0
-
-def char_to_id(char):
-    if char == ' ':
-        return 1
-    else:
-        return ord(char) - ord('a') + 2
-
-def id_to_char(i):
-    if i == 0:
-        return ''
-    elif i == 1:
-        return ' '
-    else:
-        return chr(ord('a') + i - 2)
-
 def word2id(sents, vocab):
     if type(sents[0]) == list:
         return [[vocab[w] for w in s] for s in sents]
     else:
         return [vocab[w] for w in sents]
-
 
 def read_corpus(file_path, source):
     data = []
@@ -44,6 +45,34 @@ def read_corpus(file_path, source):
         data.append(sent)
 
     return data
+
+def transform_seq_to_sent(seq, vcb):
+    return ' '.join([vcb[i] for i in seq])
+
+def transform_tensor_to_list_of_snts(tensor, vcb):
+    if isinstance(tensor, autograd.Variable):
+        np_tens = tensor.data.cpu().numpy()
+    else:
+        np_tens = tensor.cpu().numpy()
+    snts = []
+    end_snt = "</s>"
+    for i in np_tens:
+        cur_snt = transform_seq_to_sent(i, vcb)
+        snts.append(cur_snt[:cur_snt.index("</s>") if end_snt in cur_snt else len(cur_snt)].split())
+    return snts
+
+def bleu_score(outputs, targets, vcb_id2word, corpus_average=True):
+    hypothesis = transform_tensor_to_list_of_snts(outputs, vcb_id2word)
+    reference = transform_tensor_to_list_of_snts(targets, vcb_id2word)
+    reference = [[cur_ref] for cur_ref in reference]
+    list_of_hypotheses = hypothesis
+    list_of_references = reference
+    if corpus_average:
+        return compute_bleu(list_of_references, list_of_hypotheses)[0]
+    else:
+        return [compute_bleu([reference], [hypothesis])[0]\
+                for reference, hypothesis\
+                in zip(list_of_references, list_of_hypotheses)]
 
 def input_transpose(sents, pad_token):
     max_len = max(len(s) for s in sents)
@@ -101,19 +130,20 @@ def to_input_variable(sents, vocab, cuda=False, is_test=False):
     word_ids = word2id(sents, vocab)
     sents_t = input_transpose(word_ids, vocab['<pad>'])
 
-    sents_var = Variable(torch.LongTensor(sents_t), volatile=is_test, requires_grad=False)
-    sents_var = CUDA_wrapper(sents_var)
+    sents_var = autograd.Variable(LongTensor(sents_t), volatile=is_test, requires_grad=False)
 
     return sents_var
+
 # masking
 
 def sequence_mask(sequence_length, max_len=None):
     if max_len is None:
         max_len = sequence_length.data.max()
     batch_size = sequence_length.size(0)
-    seq_range = torch.range(0, max_len - 1).long()
+    #seq_range = torch.range(0, max_len - 1).long()
+    seq_range = torch.arange(0, max_len).long()
     seq_range_expand = seq_range.unsqueeze(0).expand(batch_size, max_len)
-    seq_range_expand = Variable(seq_range_expand)
+    seq_range_expand = autograd.Variable(seq_range_expand)
     if sequence_length.is_cuda:
         seq_range_expand = seq_range_expand.cuda()
     seq_length_expand = (sequence_length.unsqueeze(1)
@@ -122,7 +152,7 @@ def sequence_mask(sequence_length, max_len=None):
 
 
 def masked_cross_entropy(logits, target, length):
-    length = Variable(torch.LongTensor(length)).cuda()
+    length = autograd.Variable(LongTensor(length))
 
     """
     Args:
@@ -144,7 +174,7 @@ def masked_cross_entropy(logits, target, length):
     # logits_flat: (batch * max_len, num_classes)
     logits_flat = logits.view(-1, logits.size(-1))
     # log_probs_flat: (batch * max_len, num_classes)
-    log_probs_flat = functional.log_softmax(logits_flat)
+    log_probs_flat = F.log_softmax(logits_flat)
     # target_flat: (batch * max_len, 1)
     target_flat = target.view(-1, 1)
     # losses_flat: (batch * max_len, 1)
