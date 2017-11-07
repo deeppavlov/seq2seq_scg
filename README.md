@@ -1,6 +1,6 @@
 <h1>Seq2Seq Neural Machine Translation model with different optimization techniques</h1>
 
-This is our implementation of seq2seq neural machine translation model with different optimization techniques. For details, see the corresponding NIPS'17 workshop paper https://www.overleaf.com/read/ncpvyxbhhjgq
+This is our implementation of seq2seq neural machine translation model with different optimization techniques. For details, see the corresponding [NIPS'17 workshop paper](https://www.overleaf.com/read/ncpvyxbhhjgq)
 
 <h2> Requirements </h2>
 We recommend to use anaconda, as the easiest way for setting up requirements.
@@ -10,8 +10,8 @@ We recommend to use anaconda, as the easiest way for setting up requirements.
 
 <h2>Setting up</h2>
 
-1) Get IWSLT'14 german->english dataset https://wit3.fbk.eu/archive/2014-01/texts/de/en/de-en.tgz
-Then place it in the directory:
+1) Get [IWSLT'14 german->english dataset](https://wit3.fbk.eu/archive/2014-01/texts/de/en/de-en.tgz).
+Then, place it in the directory:
 ```
 data/nmt_iwslt
 ```
@@ -58,7 +58,7 @@ to run on GPU with id 0.
 3) Evaluate model on test dataset
 
 First, specify the model you want to evaluate as a 'start_model' in ```param_provider.py```
-Then run these two commands in order to evaluate BLEU score:
+Then, run these two commands in order to evaluate BLEU score:
 ```shell
 $ python BLEU_scorer.py
 $ python bleu_wrapper.py
