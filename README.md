@@ -2,12 +2,6 @@
 
 This is our implementation of seq2seq neural machine translation model with different optimization techniques. For details, see the corresponding [NIPS'17 workshop paper](https://www.overleaf.com/read/ncpvyxbhhjgq)
 
-<h2> Requirements </h2>
-We recommend to use anaconda, as the easiest way for setting up requirements.
-
-1) python 3.6
-2) pytorch 0.2
-
 <h2>Setting up</h2>
 
 1) Get [IWSLT'14 german->english dataset](https://wit3.fbk.eu/archive/2014-01/texts/de/en/de-en.tgz).
