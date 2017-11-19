@@ -5,11 +5,10 @@ import torch.nn as nn
 import torch.autograd as autograd
 import torch.nn.functional as F
 
-from gumbel_softmax import gumbel_softmax_sample
-
-import util
-from util import to_input_variable
-from util import CUDA_wrapper
+import utils.misc as util
+from utils.misc import to_input_variable
+from utils.misc import CUDA_wrapper
+from utils.gumbel_softmax import gumbel_softmax_sample
 
 import random
 
