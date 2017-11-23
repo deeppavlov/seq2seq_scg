@@ -1,6 +1,6 @@
 <h1>Seq2Seq Neural Machine Translation model with different optimization techniques</h1>
 
-This is our implementation of seq2seq neural machine translation model with different optimization techniques. For details, see the corresponding [NIPS'17 workshop paper](https://www.overleaf.com/read/ncpvyxbhhjgq)
+This is our implementation of seq2seq neural machine translation model with different optimization techniques. For details, see the corresponding [NIPS'17 workshop paper](https://arxiv.org/abs/1711.07724)
 
 <h2>Setting up</h2>
 
