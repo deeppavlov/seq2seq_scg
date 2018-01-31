@@ -4,25 +4,19 @@ This is our implementation of seq2seq neural machine translation model with diff
 
 <h2>Setting up</h2>
 
-1) Get [IWSLT'14 german->english dataset](https://wit3.fbk.eu/archive/2014-01/texts/de/en/de-en.tgz).
-Then, place it in the directory:
-```
-data/nmt_iwslt
-```
-
-
-2) In order to create vocab.bin run this command:
+1) In order to create vocab.bin run this command:
 ```shell
 $ python utils/vocab.py --train_src data/nmt_iwslt/train.de-en.de --train_tgt data/nmt_iwslt/train.de-en.en --output data/nmt_iwslt/vocab.bin
 ```
 
 
-3) Download pretrained word vectors:
+2) Download pretrained word vectors and run preprocessing script:
 ```shell
 $ mkdir data/fasttext
 $ cd data/fasttext
 $ wget https://s3-us-west-1.amazonaws.com/fasttext-vectors/wiki.de.vec
 $ wget https://s3-us-west-1.amazonaws.com/fasttext-vectors/wiki.en.vec
+$ python pretrained_embeddings.py
 ```
 
 
