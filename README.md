@@ -4,13 +4,20 @@ This is our implementation of seq2seq neural machine translation model with diff
 
 <h2>Setting up</h2>
 
-1) In order to create vocab.bin run this command:
+1) Run the script (borrowed from [Harvard NLP repo](https://github.com/harvardnlp/BSO/tree/master/data_prep/MT)) to download and preprocess IWSLT'14 dataset:
+```shell
+$ cd preprocessing
+$ source prepareData.sh
+```
+NOTE: this script requires Lua and luaTorch. As an alternative, you can download all necessary files from [this repo](https://github.com/pcyin/pytorch_nmt/tree/master/data)
+
+2) Run this command to create vocab.bin:
 ```shell
 $ python utils/vocab.py --train_src data/nmt_iwslt/train.de-en.de --train_tgt data/nmt_iwslt/train.de-en.en --output data/nmt_iwslt/vocab.bin
 ```
 
 
-2) Download pretrained word vectors and run preprocessing script:
+3) Download pretrained word vectors and run preprocessing script:
 ```shell
 $ mkdir data/fasttext
 $ cd data/fasttext
